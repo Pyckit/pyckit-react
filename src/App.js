@@ -133,7 +133,35 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
   const [title, setTitle] = useState(item.listingTitle || item.name);
   const [price, setPrice] = useState(parseFloat(String(item.value).replace(/[^0-9.-]+/g, '')) || 0);
   const [condition, setCondition] = useState(item.condition || 'Good');
-  const [description, setDescription] = useState(item.description || '');
+  
+  // Generate a more detailed default description
+  const generateDetailedDescription = () => {
+    const baseDesc = item.description || '';
+    if (baseDesc.length > 50) return baseDesc; // Already detailed
+    
+    // Create enhanced description based on item type
+    const itemLower = item.name.toLowerCase();
+    let enhanced = `${condition} condition ${item.name}`;
+    
+    // Add specific details based on item type
+    if (itemLower.includes('dresser') || itemLower.includes('drawer')) {
+      enhanced += ` with multiple drawers for ample storage space. Perfect for bedroom organization and adds a classic touch to any room. Well-maintained and ready for immediate use.`;
+    } else if (itemLower.includes('table')) {
+      enhanced += `. Sturdy construction ideal for dining or workspace. Shows normal wear consistent with age but remains fully functional. Great addition to any home.`;
+    } else if (itemLower.includes('chair') || itemLower.includes('sofa')) {
+      enhanced += `. Comfortable seating with good support. Upholstery/material in good condition with no major damage. Perfect for living room or office use.`;
+    } else if (itemLower.includes('lamp') || itemLower.includes('light')) {
+      enhanced += `. Fully functional with working bulb socket. Adds ambient lighting to any space. Cord and switch in good working order.`;
+    } else if (itemLower.includes('shelf') || itemLower.includes('bookcase')) {
+      enhanced += `. Excellent for storage and display. Stable construction with adjustable shelves. Perfect for books, decor, or general storage needs.`;
+    } else {
+      enhanced += `. ${baseDesc || 'Quality item in good condition, well-maintained and ready for use.'}`;
+    }
+    
+    return enhanced;
+  };
+  
+  const [description, setDescription] = useState(generateDetailedDescription());
   
   const handleList = () => {
     onList(index, { title, price, condition, description });
