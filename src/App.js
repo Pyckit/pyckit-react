@@ -239,7 +239,7 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
     }
     
     // Add moving/pickup details
-    enhanced += ` Easy to move with two people. Pickup in Calgary SW.`;
+    enhanced += `Pickup in Calgary SW.`;
     
     return enhanced;
   };
