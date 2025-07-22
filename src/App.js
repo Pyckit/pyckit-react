@@ -137,26 +137,109 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
   // Generate a more detailed default description
   const generateDetailedDescription = () => {
     const baseDesc = item.description || '';
-    if (baseDesc.length > 50) return baseDesc; // Already detailed
+    if (baseDesc.length > 100) return baseDesc; // Already very detailed
     
-    // Create enhanced description based on item type
+    // Extract brand if present in name
     const itemLower = item.name.toLowerCase();
+    const hasBrand = itemLower.includes('ikea') || itemLower.includes('malm') || 
+                     itemLower.includes('hemnes') || itemLower.includes('kallax');
+    
+    // Start with condition and full name
     let enhanced = `${condition} condition ${item.name}`;
+    
+    // Add material details if mentioned
+    if (item.name.includes('Oak Veneer') || item.name.includes('oak veneer')) {
+      enhanced = enhanced.replace('Oak Veneer', '(oak veneer)');
+    }
     
     // Add specific details based on item type
     if (itemLower.includes('dresser') || itemLower.includes('drawer')) {
-      enhanced += ` with multiple drawers for ample storage space. Perfect for bedroom organization and adds a classic touch to any room. Well-maintained and ready for immediate use.`;
+      const drawerCount = item.name.match(/(\d+)-drawer/i)?.[1] || 'multiple';
+      enhanced += `. Features ${drawerCount} drawers for ample storage space. Perfect for bedroom organization and adds a classic touch to any room.`;
+      
+      if (hasBrand) {
+        enhanced += ` Popular IKEA model known for quality and durability.`;
+      }
+      
+      enhanced += ` Dimensions suitable for most bedrooms. All drawers slide smoothly. Well-maintained with no structural damage. Clean and ready for immediate use.`;
+      
+      if (condition === 'Excellent' || condition === 'Very Good') {
+        enhanced += ` Minimal signs of wear - looks nearly new.`;
+      }
+      
     } else if (itemLower.includes('table')) {
-      enhanced += `. Sturdy construction ideal for dining or workspace. Shows normal wear consistent with age but remains fully functional. Great addition to any home.`;
+      enhanced += `. Sturdy construction ideal for dining or workspace.`;
+      
+      if (itemLower.includes('dining')) {
+        enhanced += ` Seats 4-6 people comfortably. Perfect for family meals or entertaining.`;
+      } else if (itemLower.includes('coffee')) {
+        enhanced += ` Ideal height for living room use. Ample surface for drinks, books, and decor.`;
+      }
+      
+      enhanced += ` Surface in good condition with normal wear consistent with age. Legs are stable with no wobbling. Great addition to any home.`;
+      
     } else if (itemLower.includes('chair') || itemLower.includes('sofa')) {
-      enhanced += `. Comfortable seating with good support. Upholstery/material in good condition with no major damage. Perfect for living room or office use.`;
+      enhanced += `. Comfortable seating with good support.`;
+      
+      if (itemLower.includes('sofa')) {
+        const seats = item.name.match(/(\d+)[\s-]?seat/i)?.[1];
+        if (seats) {
+          enhanced += ` ${seats}-seater perfect for living room or family room.`;
+        }
+        enhanced += ` Cushions retain their shape well. Frame is solid and sturdy.`;
+      }
+      
+      enhanced += ` Upholstery/material in ${condition.toLowerCase()} condition with no major tears, stains, or damage. Non-smoking home. Perfect for living room, bedroom, or office use.`;
+      
     } else if (itemLower.includes('lamp') || itemLower.includes('light')) {
-      enhanced += `. Fully functional with working bulb socket. Adds ambient lighting to any space. Cord and switch in good working order.`;
-    } else if (itemLower.includes('shelf') || itemLower.includes('bookcase')) {
-      enhanced += `. Excellent for storage and display. Stable construction with adjustable shelves. Perfect for books, decor, or general storage needs.`;
+      enhanced += `. Fully functional with working bulb socket and switch. Adds perfect ambient lighting to any space.`;
+      
+      if (itemLower.includes('floor')) {
+        enhanced += ` Stable base prevents tipping. Adjustable height/angle for optimal lighting.`;
+      } else if (itemLower.includes('table')) {
+        enhanced += ` Compact size perfect for nightstand or side table use.`;
+      }
+      
+      enhanced += ` Cord in excellent condition with no fraying. Shade is clean and intact. Energy-efficient bulb compatible.`;
+      
+    } else if (itemLower.includes('shelf') || itemLower.includes('bookcase') || itemLower.includes('bookshelf')) {
+      const shelfCount = item.name.match(/(\d+)[\s-]?shelf/i)?.[1];
+      enhanced += `. Excellent for storage and display.`;
+      
+      if (shelfCount) {
+        enhanced += ` Features ${shelfCount} shelves for ample storage.`;
+      } else {
+        enhanced += ` Multiple shelves provide versatile storage options.`;
+      }
+      
+      if (itemLower.includes('kallax') || itemLower.includes('expedit')) {
+        enhanced += ` Popular IKEA cube storage system - perfect for books, bins, or display items.`;
+      }
+      
+      enhanced += ` Stable construction supports heavy books without sagging. Perfect for home office, living room, or bedroom. Easy to assemble/disassemble for transport.`;
+      
+    } else if (itemLower.includes('desk')) {
+      enhanced += `. Spacious work surface perfect for home office or study area. Sturdy construction supports computer equipment and office supplies.`;
+      
+      if (itemLower.includes('drawer')) {
+        enhanced += ` Built-in storage keeps workspace organized.`;
+      }
+      
+      enhanced += ` Height is comfortable for extended work sessions. Surface shows minimal wear. Cable management features help maintain clean setup.`;
+      
     } else {
-      enhanced += `. ${baseDesc || 'Quality item in good condition, well-maintained and ready for use.'}`;
+      // Generic but still detailed fallback
+      enhanced += `. Quality item well-suited for home use. Shows normal wear consistent with age but remains fully functional.`;
+      
+      if (hasBrand) {
+        enhanced += ` Trusted brand known for durability and style.`;
+      }
+      
+      enhanced += ` Clean, well-maintained, and ready for immediate use. From smoke-free home.`;
     }
+    
+    // Add moving/pickup details
+    enhanced += ` Easy to move with two people. Pickup in Calgary SW.`;
     
     return enhanced;
   };
