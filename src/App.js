@@ -238,9 +238,6 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
       enhanced += ` Clean, well-maintained, and ready for immediate use. From smoke-free home.`;
     }
     
-    // Add moving/pickup details
-    enhanced += `Pickup in Calgary SW.`;
-    
     return enhanced;
   };
   
