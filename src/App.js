@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 // Utility functions
-const API_URL = '/api';
+const API_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:3001'
+  : '/api';
 
 const API_KEY_STORAGE = 'pyckit_api_key';
 
@@ -573,6 +576,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        <SpeedInsights />
       </div>
     );
   }
@@ -657,6 +661,7 @@ export default function App() {
           />
         </div>
       </div>
+      <SpeedInsights />
     </div>
   );
 }

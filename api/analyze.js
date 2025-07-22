@@ -40,6 +40,26 @@ function determineCondition(confidence) {
   return 'Fair';
 }
 
+// Helper function to generate descriptions
+function generateItemDescription(item) {
+  const descriptions = {
+    'dresser': `${item.condition || 'Good'} condition dresser with ample storage space. Perfect for bedroom organization.`,
+    'vase': `Beautiful decorative vase in ${item.condition || 'good'} condition. Adds elegance to any room.`,
+    'lamp': `Modern table lamp in ${item.condition || 'good'} working condition. Provides excellent ambient lighting.`,
+    'plant': `Healthy ${item.name || 'plant'} that adds natural beauty to your space.`,
+    'default': `Quality ${item.name || 'item'} in ${item.condition || 'good'} condition. Well-maintained and ready for a new home.`
+  };
+
+  // Find matching description
+  for (const [key, desc] of Object.entries(descriptions)) {
+    if (item.name?.toLowerCase().includes(key)) {
+      return desc;
+    }
+  }
+  
+  return descriptions.default;
+}
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -88,10 +108,16 @@ export default async function handler(req, res) {
 
 Analyze this room photo and identify ALL sellable items you can see. For each item, provide:
 1. Item name (be specific, e.g., "Wooden Office Desk" not just "desk")
-2. Estimated value in Canadian dollars for the Calgary market
+2. Estimated value in Canadian dollars for the Calgary Alberta market
 3. Condition assessment
-4. Bounding box coordinates as percentages of image dimensions
+4. Bounding box coordinates as percentages (0-100) where:
+   - x: horizontal position from left edge (0 = far left, 100 = far right)
+   - y: vertical position from top edge (0 = top, 100 = bottom)
+   - width: width as percentage of image
+   - height: height as percentage of image
 5. Confidence level (0-100)
+
+IMPORTANT: Bounding box coordinates must be percentages between 0 and 100.
 
 Focus on items that would sell well on Kijiji Calgary or Facebook Marketplace.
 
@@ -99,20 +125,25 @@ Return your response as a JSON object with this exact structure:
 {
   "items": [
     {
-      "name": "Item Name",
+      "name": "IKEA MALM 6-Drawer Dresser",
       "value": 250,
       "condition": "Good",
       "confidence": 85,
       "boundingBox": {
-        "x": 10,
-        "y": 20,
-        "width": 30,
+        "x": 20,
+        "y": 40,
+        "width": 60,
         "height": 40
       },
       "category": "furniture",
       "sellability": "High demand in Calgary market"
     }
   ],
+  "roomType": "bedroom",
+  "insights": {
+    "quickWins": ["List dresser first - highest value", "Plant adds appeal to room photos"]
+  }
+}
   "roomType": "bedroom",
   "insights": {
     "quickWins": ["List item 1 first - highest demand", "Bundle items 2 and 3 for better value"]
@@ -191,6 +222,7 @@ Return your response as a JSON object with this exact structure:
         confidence: item.confidence || 85,
         condition: item.condition || determineCondition(item.confidence || 85),
         listingTitle: `${item.name} - ${item.condition || 'Good'} Condition`,
+        description: generateItemDescription(item),
         bestSeason: item.category === 'furniture' ? 'Spring (March-May) - Moving season' : 'Year-round',
         boundingBox: item.boundingBox || {
           x: 10 + (index * 15),
