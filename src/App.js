@@ -326,7 +326,39 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     if (imageFile && imageRef.current) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        imageRef.current.src = e.target.result;
+        const img = new Image();
+        img.onload = () => {
+          // Standardize image size for consistent processing
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          
+          let width = img.width;
+          let height = img.height;
+          
+          // Calculate scaling to fit within max dimensions while maintaining aspect ratio
+          if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+            const widthRatio = MAX_WIDTH / width;
+            const heightRatio = MAX_HEIGHT / height;
+            const scale = Math.min(widthRatio, heightRatio);
+            
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+          }
+          
+          // Create canvas to resize image
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Set the resized image
+          imageRef.current.src = canvas.toDataURL('image/jpeg', 0.9);
+          
+          console.log(`Image standardized from ${img.width}x${img.height} to ${width}x${height}`);
+        };
+        img.src = e.target.result;
       };
       reader.readAsDataURL(imageFile);
     }
@@ -370,7 +402,6 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     console.log('=== BOUNDING BOX DEBUG ===');
     console.log('Image Natural Dimensions:', img.naturalWidth, 'x', img.naturalHeight);
     console.log('Image Display Dimensions:', displayWidth, 'x', displayHeight);
-    console.log('Scale Factors:', displayWidth/img.naturalWidth, 'x', displayHeight/img.naturalHeight);
     console.log('Number of items:', items.length);
     
     items.forEach((item, index) => {
@@ -396,13 +427,19 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           const x_max = item.boundingBox.x_max;
           const y_max = item.boundingBox.y_max;
           
-          // Check if coordinates are normalized (0-1) or pixels
+          // Check if coordinates are normalized (0-1) or percentages
           if (x_max <= 1) {
             // Normalized coordinates
             x = x_min * displayWidth;
             y = y_min * displayHeight;
             width = (x_max - x_min) * displayWidth;
             height = (y_max - y_min) * displayHeight;
+          } else if (x_max <= 100) {
+            // Percentage coordinates
+            x = (x_min / 100) * displayWidth;
+            y = (y_min / 100) * displayHeight;
+            width = ((x_max - x_min) / 100) * displayWidth;
+            height = ((y_max - y_min) / 100) * displayHeight;
           } else {
             // Pixel coordinates - scale to display
             const scaleX = displayWidth / img.naturalWidth;
@@ -416,25 +453,13 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           // Handle x, y, width, height format
           console.log('Detected: x/y/width/height format');
           
-          // COORDINATE CORRECTION - API seems to be returning coordinates 
-          // that need adjustment. Based on the visual pattern, we need to 
-          // shift coordinates to the right
-          const COORDINATE_OFFSET_X = 0.15; // 15% shift right
-          const COORDINATE_OFFSET_Y = 0.05; // 5% shift down
-          
-          if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
-              item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
-            // Normalized coordinates (0-1)
-            console.log('Using normalized coordinates (0-1)');
-            x = (item.boundingBox.x + COORDINATE_OFFSET_X) * displayWidth;
-            y = (item.boundingBox.y + COORDINATE_OFFSET_Y) * displayHeight;
-            width = item.boundingBox.width * displayWidth;
-            height = item.boundingBox.height * displayHeight;
-          } else if (item.boundingBox.x <= 100) {
+          // For Claude API, coordinates are percentages (0-100)
+          // Remove the offset - let's see raw positions first
+          if (item.boundingBox.x <= 100) {
             // Percentage coordinates (0-100)
             console.log('Using percentage coordinates (0-100)');
-            x = ((item.boundingBox.x / 100) + COORDINATE_OFFSET_X) * displayWidth;
-            y = ((item.boundingBox.y / 100) + COORDINATE_OFFSET_Y) * displayHeight;
+            x = (item.boundingBox.x / 100) * displayWidth;
+            y = (item.boundingBox.y / 100) * displayHeight;
             width = (item.boundingBox.width / 100) * displayWidth;
             height = (item.boundingBox.height / 100) * displayHeight;
           } else {
@@ -442,8 +467,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
             console.log('Using absolute pixel coordinates');
             const scaleX = displayWidth / img.naturalWidth;
             const scaleY = displayHeight / img.naturalHeight;
-            x = (item.boundingBox.x + (COORDINATE_OFFSET_X * img.naturalWidth)) * scaleX;
-            y = (item.boundingBox.y + (COORDINATE_OFFSET_Y * img.naturalHeight)) * scaleY;
+            x = item.boundingBox.x * scaleX;
+            y = item.boundingBox.y * scaleY;
             width = item.boundingBox.width * scaleX;
             height = item.boundingBox.height * scaleY;
           }
@@ -465,22 +490,10 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         console.log('Position AFTER padding:', x, y, width, height);
         
         // Ensure boxes stay within image bounds
-        if (x < 0) {
-          console.log('Box exceeds left boundary, adjusting...');
-          x = 0;
-        }
-        if (y < 0) {
-          console.log('Box exceeds top boundary, adjusting...');
-          y = 0;
-        }
-        if (x + width > displayWidth) {
-          console.log('Box exceeds right boundary, adjusting...');
-          width = displayWidth - x;
-        }
-        if (y + height > displayHeight) {
-          console.log('Box exceeds bottom boundary, adjusting...');
-          height = displayHeight - y;
-        }
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        width = Math.min(width, displayWidth - x);
+        height = Math.min(height, displayHeight - y);
         
         console.log('Final position:', x, y, width, height);
         
@@ -663,12 +676,12 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       
       <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Prepare Listings</h3>
       
-      <div className="image-with-boxes" id="imageWithBoxes">
+      <div className="image-with-boxes" id="imageWithBoxes" style={{ maxWidth: 800, margin: '0 auto' }}>
         <img
           ref={imageRef}
           id="analyzedImage"
           alt="Analyzed room"
-          style={{ maxWidth: '100%', height: 'auto' }}
+          style={{ width: '100%', height: 'auto', display: 'block' }}
           onLoad={handleImageLoad}
         />
       </div>
