@@ -385,31 +385,68 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         // Parse the bounding box values
         let x, y, width, height;
         
-        // Check if coordinates are normalized (0-1) or percentages (0-100)
-        if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
-            item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
-          // Normalized coordinates (0-1)
-          console.log('Detected: Normalized coordinates (0-1)');
-          x = item.boundingBox.x * displayWidth;
-          y = item.boundingBox.y * displayHeight;
-          width = item.boundingBox.width * displayWidth;
-          height = item.boundingBox.height * displayHeight;
-        } else if (item.boundingBox.x <= 100) {
-          // Percentage coordinates (0-100)
-          console.log('Detected: Percentage coordinates (0-100)');
-          x = (item.boundingBox.x / 100) * displayWidth;
-          y = (item.boundingBox.y / 100) * displayHeight;
-          width = (item.boundingBox.width / 100) * displayWidth;
-          height = (item.boundingBox.height / 100) * displayHeight;
+        // Check if we have x_min/y_min format or x/y format
+        const hasMinMax = 'x_min' in item.boundingBox;
+        
+        if (hasMinMax) {
+          // Handle x_min, y_min, x_max, y_max format
+          console.log('Detected: min/max format');
+          const x_min = item.boundingBox.x_min;
+          const y_min = item.boundingBox.y_min;
+          const x_max = item.boundingBox.x_max;
+          const y_max = item.boundingBox.y_max;
+          
+          // Check if coordinates are normalized (0-1) or pixels
+          if (x_max <= 1) {
+            // Normalized coordinates
+            x = x_min * displayWidth;
+            y = y_min * displayHeight;
+            width = (x_max - x_min) * displayWidth;
+            height = (y_max - y_min) * displayHeight;
+          } else {
+            // Pixel coordinates - scale to display
+            const scaleX = displayWidth / img.naturalWidth;
+            const scaleY = displayHeight / img.naturalHeight;
+            x = x_min * scaleX;
+            y = y_min * scaleY;
+            width = (x_max - x_min) * scaleX;
+            height = (y_max - y_min) * scaleY;
+          }
         } else {
-          // Absolute pixel coordinates - scale to display size
-          console.log('Detected: Absolute pixel coordinates');
-          const scaleX = displayWidth / img.naturalWidth;
-          const scaleY = displayHeight / img.naturalHeight;
-          x = item.boundingBox.x * scaleX;
-          y = item.boundingBox.y * scaleY;
-          width = item.boundingBox.width * scaleX;
-          height = item.boundingBox.height * scaleY;
+          // Handle x, y, width, height format
+          console.log('Detected: x/y/width/height format');
+          
+          // COORDINATE CORRECTION - API seems to be returning coordinates 
+          // that need adjustment. Based on the visual pattern, we need to 
+          // shift coordinates to the right
+          const COORDINATE_OFFSET_X = 0.15; // 15% shift right
+          const COORDINATE_OFFSET_Y = 0.05; // 5% shift down
+          
+          if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
+              item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
+            // Normalized coordinates (0-1)
+            console.log('Using normalized coordinates (0-1)');
+            x = (item.boundingBox.x + COORDINATE_OFFSET_X) * displayWidth;
+            y = (item.boundingBox.y + COORDINATE_OFFSET_Y) * displayHeight;
+            width = item.boundingBox.width * displayWidth;
+            height = item.boundingBox.height * displayHeight;
+          } else if (item.boundingBox.x <= 100) {
+            // Percentage coordinates (0-100)
+            console.log('Using percentage coordinates (0-100)');
+            x = ((item.boundingBox.x / 100) + COORDINATE_OFFSET_X) * displayWidth;
+            y = ((item.boundingBox.y / 100) + COORDINATE_OFFSET_Y) * displayHeight;
+            width = (item.boundingBox.width / 100) * displayWidth;
+            height = (item.boundingBox.height / 100) * displayHeight;
+          } else {
+            // Absolute pixel coordinates - scale to display size
+            console.log('Using absolute pixel coordinates');
+            const scaleX = displayWidth / img.naturalWidth;
+            const scaleY = displayHeight / img.naturalHeight;
+            x = (item.boundingBox.x + (COORDINATE_OFFSET_X * img.naturalWidth)) * scaleX;
+            y = (item.boundingBox.y + (COORDINATE_OFFSET_Y * img.naturalHeight)) * scaleY;
+            width = item.boundingBox.width * scaleX;
+            height = item.boundingBox.height * scaleY;
+          }
         }
         
         console.log('Calculated position BEFORE padding:', x, y, width, height);
