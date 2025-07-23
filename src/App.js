@@ -471,6 +471,9 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         const box = document.createElement('div');
         box.className = 'bounding-box';
         box.id = `box-${index}`;
+        box.style.position = 'absolute';
+        box.style.pointerEvents = 'auto';
+        box.style.cursor = 'pointer';
         
         // Parse the bounding box values
         let x, y, width, height;
@@ -561,6 +564,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.style.width = width + 'px';
         box.style.height = height + 'px';
         box.style.borderColor = boxColor; // Use color coding for debugging
+        box.style.borderWidth = '3px';
+        box.style.borderStyle = 'solid';
         
         const label = document.createElement('div');
         label.className = 'box-label';
@@ -715,9 +720,10 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   };
   
   const handleImageLoad = () => {
-    console.log('Image loaded event fired');
+    console.log('=== IMAGE LOAD EVENT ===');
     console.log('Natural dimensions:', imageRef.current?.naturalWidth, 'x', imageRef.current?.naturalHeight);
     console.log('Display dimensions:', imageRef.current?.clientWidth, 'x', imageRef.current?.clientHeight);
+    console.log('Offset dimensions:', imageRef.current?.offsetWidth, 'x', imageRef.current?.offsetHeight);
     
     // Set image ready after a small delay to ensure browser has rendered
     setTimeout(() => {
@@ -736,7 +742,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       
       <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Prepare Listings</h3>
       
-      <div className="image-with-boxes" id="imageWithBoxes" style={{ maxWidth: 800, margin: '0 auto' }}>
+      <div className="image-with-boxes" id="imageWithBoxes" style={{ maxWidth: 800, margin: '0 auto', position: 'relative' }}>
         <img
           ref={imageRef}
           id="analyzedImage"
