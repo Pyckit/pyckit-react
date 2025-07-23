@@ -442,9 +442,14 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     const displayWidth = img.clientWidth;
     const displayHeight = img.clientHeight;
     
+    // Calculate scale factors for any size mismatch
+    const scaleX = displayWidth / img.naturalWidth;
+    const scaleY = displayHeight / img.naturalHeight;
+    
     console.log('=== BOUNDING BOX DEBUG ===');
     console.log('Image Natural Dimensions:', img.naturalWidth, 'x', img.naturalHeight);
     console.log('Image Display Dimensions:', displayWidth, 'x', displayHeight);
+    console.log('Scale factors:', scaleX, 'x', scaleY);
     console.log('Number of items:', items.length);
     
     items.forEach((item, index) => {
@@ -520,10 +525,11 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           if (item.boundingBox.x <= 100) {
             // Percentage coordinates (0-100)
             console.log('Using percentage coordinates (0-100)');
-            x = (item.boundingBox.x / 100) * displayWidth;
-            y = (item.boundingBox.y / 100) * displayHeight;
-            width = (item.boundingBox.width / 100) * displayWidth;
-            height = (item.boundingBox.height / 100) * displayHeight;
+            // Apply scale factors to handle display vs natural size differences
+            x = (item.boundingBox.x / 100) * img.naturalWidth * scaleX;
+            y = (item.boundingBox.y / 100) * img.naturalHeight * scaleY;
+            width = (item.boundingBox.width / 100) * img.naturalWidth * scaleX;
+            height = (item.boundingBox.height / 100) * img.naturalHeight * scaleY;
           } else {
             // Absolute pixel coordinates - scale to display size
             console.log('Using absolute pixel coordinates');
@@ -747,7 +753,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           ref={imageRef}
           id="analyzedImage"
           alt="Analyzed room"
-          style={{ width: '100%', height: 'auto', display: 'block' }}
+          style={{ width: '100%', maxWidth: 800, height: 'auto', display: 'block' }}
           onLoad={handleImageLoad}
         />
       </div>
