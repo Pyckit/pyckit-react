@@ -188,6 +188,7 @@ body {
 .message-content {
   flex: 1;
   line-height: 1.6;
+  /* REMOVED any max-height constraints */
 }
 
 .message-text {
@@ -361,6 +362,7 @@ body {
   padding: 24px 0;
   margin-top: 16px;
   width: 100%;
+  /* REMOVED any height constraints */
 }
 
 .total-value {
@@ -597,22 +599,26 @@ body {
   transform: translateY(-1px);
 }
 
-/* Bounding box overlay */
+/* CRITICAL FIX: Bounding box overlay and image display */
 .image-with-boxes {
   position: relative;
   display: block;
   max-width: 800px;
   margin: 20px auto;
   text-align: center;
+  /* Allow container to grow to natural image height */
+  height: auto !important;
+  overflow: visible;
 }
 
 .image-with-boxes img {
   width: 100%;
-  height: auto;
+  height: auto !important;
   display: block;
   margin: 0 auto;
-  max-height: 600px;
-  object-fit: contain;
+  /* REMOVED max-height constraint that was causing the squishing */
+  /* REMOVED object-fit to let image display naturally */
+  max-width: 100%;
 }
 
 .bounding-box {
