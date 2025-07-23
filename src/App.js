@@ -1,4 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+// SPECIAL HANDLING FOR KNOWN MISALIGNMENTS
+        // If this is a floor lamp with coordinates on the left side, it might be misidentified
+        if (itemNameLower.includes('lamp') && item.boundingBox.x < 40) {
+          console.log('⚠️ WARNING: Floor lamp detected on LEFT side - this might be incorrect!');
+          console.log('The actual floor lamp is likely on the RIGHT side of the image.');
+          
+          // Check if there's another tall object on the right that might be the real lamp
+          // For now, let's draw the box where Claude says it is, but highlight the issue
+          boxColor = '#FF0000'; // Bright red for suspected misidentification
+        }import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { SpeedInsights } from "@vercel/speed-insights/react";
 
@@ -318,7 +327,41 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
 const ImageAnalysis = ({ analysisData, imageFile }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
-  const [items, setItems] = useState(analysisData.items || []);
+  
+  // Process items to handle duplicate names
+  const processItemsWithUniqueNames = (rawItems) => {
+    const nameCounts = {};
+    const processedItems = [];
+    
+    // First pass - count occurrences of each name
+    rawItems.forEach(item => {
+      const baseName = item.name;
+      nameCounts[baseName] = (nameCounts[baseName] || 0) + 1;
+    });
+    
+    // Second pass - add numbers to duplicates
+    const nameIndices = {};
+    rawItems.forEach(item => {
+      const baseName = item.name;
+      let finalName = baseName;
+      
+      if (nameCounts[baseName] > 1) {
+        // This name appears multiple times, add a number
+        nameIndices[baseName] = (nameIndices[baseName] || 0) + 1;
+        finalName = `${baseName} ${nameIndices[baseName]}`;
+      }
+      
+      processedItems.push({
+        ...item,
+        originalName: baseName,
+        name: finalName
+      });
+    });
+    
+    return processedItems;
+  };
+  
+  const [items, setItems] = useState(processItemsWithUniqueNames(analysisData.items || []));
   const [totalValue, setTotalValue] = useState(analysisData.totalValue || 0);
   const [imageReady, setImageReady] = useState(false);
   
@@ -408,6 +451,22 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       if (item.boundingBox && !item.removed) {
         console.log(`\n--- Item ${index}: ${item.name} ---`);
         console.log('Raw boundingBox data:', JSON.stringify(item.boundingBox));
+        console.log(`Position: ${item.boundingBox.x}% from left, ${item.boundingBox.y}% from top`);
+        console.log(`Size: ${item.boundingBox.width}% wide, ${item.boundingBox.height}% tall`);
+        
+        // Add visual debugging - color code boxes by item type
+        let boxColor = 'var(--primary-color)'; // default yellow
+        const itemNameLower = item.name.toLowerCase();
+        if (itemNameLower.includes('lamp')) {
+          boxColor = '#FF6B6B'; // red for lamps
+          console.log('🔴 LAMP DETECTED - should be on RIGHT side of image');
+        } else if (itemNameLower.includes('chair')) {
+          boxColor = '#4ECDC4'; // teal for chairs
+        } else if (itemNameLower.includes('art') || itemNameLower.includes('print')) {
+          boxColor = '#95E1D3'; // light green for art
+        } else if (itemNameLower.includes('table')) {
+          boxColor = '#F38181'; // pink for tables
+        }
         
         const box = document.createElement('div');
         box.className = 'bounding-box';
@@ -501,6 +560,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.style.top = y + 'px';
         box.style.width = width + 'px';
         box.style.height = height + 'px';
+        box.style.borderColor = boxColor; // Use color coding for debugging
         
         const label = document.createElement('div');
         label.className = 'box-label';
