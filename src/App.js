@@ -728,19 +728,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     console.log('=== IMAGE LOAD EVENT ===');
     console.log('Natural dimensions:', imageRef.current?.naturalWidth, 'x', imageRef.current?.naturalHeight);
     console.log('Display dimensions:', imageRef.current?.clientWidth, 'x', imageRef.current?.clientHeight);
-    console.log('Offset dimensions:', imageRef.current?.offsetWidth, 'x', imageRef.current?.offsetHeight);
     
-    // Force the container to match the image aspect ratio
-    const container = document.getElementById('imageWithBoxes');
-    if (container && imageRef.current) {
-      const aspectRatio = imageRef.current.naturalHeight / imageRef.current.naturalWidth;
-      const containerWidth = container.offsetWidth;
-      const correctHeight = containerWidth * aspectRatio;
-      container.style.height = correctHeight + 'px';
-      console.log('Set container height to:', correctHeight);
-    }
-    
-    // Set image ready after a small delay to ensure browser has rendered
+    // Just set image ready - let CSS handle the sizing
     setTimeout(() => {
       setImageReady(true);
     }, 200);
