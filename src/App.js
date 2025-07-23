@@ -367,12 +367,17 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     const displayWidth = img.clientWidth;
     const displayHeight = img.clientHeight;
     
-    console.log('Drawing boxes - Natural:', img.naturalWidth, 'x', img.naturalHeight);
-    console.log('Drawing boxes - Display:', displayWidth, 'x', displayHeight);
+    console.log('=== BOUNDING BOX DEBUG ===');
+    console.log('Image Natural Dimensions:', img.naturalWidth, 'x', img.naturalHeight);
+    console.log('Image Display Dimensions:', displayWidth, 'x', displayHeight);
+    console.log('Scale Factors:', displayWidth/img.naturalWidth, 'x', displayHeight/img.naturalHeight);
     console.log('Number of items:', items.length);
     
     items.forEach((item, index) => {
       if (item.boundingBox && !item.removed) {
+        console.log(`\n--- Item ${index}: ${item.name} ---`);
+        console.log('Raw boundingBox data:', JSON.stringify(item.boundingBox));
+        
         const box = document.createElement('div');
         box.className = 'bounding-box';
         box.id = `box-${index}`;
@@ -384,18 +389,21 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
             item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
           // Normalized coordinates (0-1)
+          console.log('Detected: Normalized coordinates (0-1)');
           x = item.boundingBox.x * displayWidth;
           y = item.boundingBox.y * displayHeight;
           width = item.boundingBox.width * displayWidth;
           height = item.boundingBox.height * displayHeight;
         } else if (item.boundingBox.x <= 100) {
           // Percentage coordinates (0-100)
+          console.log('Detected: Percentage coordinates (0-100)');
           x = (item.boundingBox.x / 100) * displayWidth;
           y = (item.boundingBox.y / 100) * displayHeight;
           width = (item.boundingBox.width / 100) * displayWidth;
           height = (item.boundingBox.height / 100) * displayHeight;
         } else {
           // Absolute pixel coordinates - scale to display size
+          console.log('Detected: Absolute pixel coordinates');
           const scaleX = displayWidth / img.naturalWidth;
           const scaleY = displayHeight / img.naturalHeight;
           x = item.boundingBox.x * scaleX;
@@ -404,21 +412,40 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           height = item.boundingBox.height * scaleY;
         }
         
-        // Apply tight bounding box (remove excessive padding)
-        // Reduce box size by 10% to create tighter bounds
-        const padding = 0.05; // 5% padding instead of whatever the API added
-        const centerX = x + width / 2;
-        const centerY = y + height / 2;
-        width = width * (1 - padding * 2);
-        height = height * (1 - padding * 2);
-        x = centerX - width / 2;
-        y = centerY - height / 2;
+        console.log('Calculated position BEFORE padding:', x, y, width, height);
+        
+        // ADD GENEROUS PADDING for background removal (20% extra on all sides)
+        const padding = 0.2; // 20% padding for background removal
+        const padX = width * padding;
+        const padY = height * padding;
+        
+        // Expand the box by padding amount
+        x = x - padX;
+        y = y - padY;
+        width = width + (padX * 2);
+        height = height + (padY * 2);
+        
+        console.log('Position AFTER padding:', x, y, width, height);
         
         // Ensure boxes stay within image bounds
-        x = Math.max(0, Math.min(x, displayWidth - width));
-        y = Math.max(0, Math.min(y, displayHeight - height));
-        width = Math.min(width, displayWidth - x);
-        height = Math.min(height, displayHeight - y);
+        if (x < 0) {
+          console.log('Box exceeds left boundary, adjusting...');
+          x = 0;
+        }
+        if (y < 0) {
+          console.log('Box exceeds top boundary, adjusting...');
+          y = 0;
+        }
+        if (x + width > displayWidth) {
+          console.log('Box exceeds right boundary, adjusting...');
+          width = displayWidth - x;
+        }
+        if (y + height > displayHeight) {
+          console.log('Box exceeds bottom boundary, adjusting...');
+          height = displayHeight - y;
+        }
+        
+        console.log('Final position:', x, y, width, height);
         
         box.style.left = x + 'px';
         box.style.top = y + 'px';
@@ -433,9 +460,9 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.onclick = () => highlightBox(index);
         
         container.appendChild(box);
-        console.log(`Drew box ${index} at ${x},${y} size ${width}x${height} (original: ${item.boundingBox.x}, ${item.boundingBox.y})`);
       }
     });
+    console.log('=== END BOUNDING BOX DEBUG ===\n');
   };
   
   const generateThumbnails = () => {
@@ -455,7 +482,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       return;
     }
     
-    console.log('Generating thumbnails - Natural size:', img.naturalWidth, 'x', img.naturalHeight);
+    console.log('=== THUMBNAIL GENERATION DEBUG ===');
+    console.log('Natural size:', img.naturalWidth, 'x', img.naturalHeight);
     console.log('Display size:', img.clientWidth, 'x', img.clientHeight);
     
     items.forEach((item, index) => {
@@ -467,6 +495,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         }
         
         try {
+          console.log(`\nGenerating thumbnail ${index} for ${item.name}`);
           canvas.width = 300;
           canvas.height = 200;
           
@@ -494,20 +523,25 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
             sourceHeight = item.boundingBox.height;
           }
           
-          // Apply tighter crop (remove excessive padding from API)
-          const cropPadding = 0.05; // 5% padding
-          const centerX = sourceX + sourceWidth / 2;
-          const centerY = sourceY + sourceHeight / 2;
-          sourceWidth = sourceWidth * (1 - cropPadding * 2);
-          sourceHeight = sourceHeight * (1 - cropPadding * 2);
-          sourceX = centerX - sourceWidth / 2;
-          sourceY = centerY - sourceHeight / 2;
+          console.log('Source coords before padding:', sourceX, sourceY, sourceWidth, sourceHeight);
+          
+          // Apply GENEROUS padding for background removal (20% on all sides)
+          const cropPadding = 0.2; // 20% padding
+          const padX = sourceWidth * cropPadding;
+          const padY = sourceHeight * cropPadding;
+          
+          sourceX = sourceX - padX;
+          sourceY = sourceY - padY;
+          sourceWidth = sourceWidth + (padX * 2);
+          sourceHeight = sourceHeight + (padY * 2);
           
           // Ensure we don't go outside image bounds
           sourceX = Math.max(0, sourceX);
           sourceY = Math.max(0, sourceY);
           sourceWidth = Math.min(sourceWidth, img.naturalWidth - sourceX);
           sourceHeight = Math.min(sourceHeight, img.naturalHeight - sourceY);
+          
+          console.log('Source coords after padding:', sourceX, sourceY, sourceWidth, sourceHeight);
           
           // Clear canvas
           ctx.fillStyle = 'white';
@@ -531,14 +565,13 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
           thumbnailImg.src = dataUrl;
           
-          console.log(`Generated thumbnail ${index} from source (${Math.round(sourceX)},${Math.round(sourceY)}) size ${Math.round(sourceWidth)}x${Math.round(sourceHeight)}`);
-          
         } catch (err) {
           console.error(`Failed to generate thumbnail ${index}:`, err);
           thumbnailImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23f0f0f0"/%3E%3Ctext x="150" y="100" text-anchor="middle" fill="%23999" font-family="Arial" font-size="14"%3EThumbnail Error%3C/text%3E%3C/svg%3E';
         }
       }
     });
+    console.log('=== END THUMBNAIL DEBUG ===\n');
   };
   
   const highlightBox = (index) => {
