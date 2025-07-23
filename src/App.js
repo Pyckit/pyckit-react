@@ -524,7 +524,6 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           // Remove the offset - let's see raw positions first
           if (item.boundingBox.x <= 100) {
             console.log('Using percentage coordinates (0-100)');
-            // Directly map percentages to display dimensions
             x = (item.boundingBox.x / 100) * displayWidth;
             y = (item.boundingBox.y / 100) * displayHeight;
             width = (item.boundingBox.width / 100) * displayWidth;
