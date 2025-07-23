@@ -523,13 +523,12 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           // For Claude API, coordinates are percentages (0-100)
           // Remove the offset - let's see raw positions first
           if (item.boundingBox.x <= 100) {
-            // Percentage coordinates (0-100)
             console.log('Using percentage coordinates (0-100)');
-            // Apply scale factors to handle display vs natural size differences
-            x = (item.boundingBox.x / 100) * img.naturalWidth * scaleX;
-            y = (item.boundingBox.y / 100) * img.naturalHeight * scaleY;
-            width = (item.boundingBox.width / 100) * img.naturalWidth * scaleX;
-            height = (item.boundingBox.height / 100) * img.naturalHeight * scaleY;
+            // Directly map percentages to display dimensions
+            x = (item.boundingBox.x / 100) * displayWidth;
+            y = (item.boundingBox.y / 100) * displayHeight;
+            width = (item.boundingBox.width / 100) * displayWidth;
+            height = (item.boundingBox.height / 100) * displayHeight;
           } else {
             // Absolute pixel coordinates - scale to display size
             console.log('Using absolute pixel coordinates');
