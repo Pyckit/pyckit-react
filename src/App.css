@@ -721,3 +721,25 @@ body {
 .hidden {
   display: none;
 }
+/* TEMPORARY DEBUG - Remove after fixing */
+.image-with-boxes {
+  border: 5px solid red !important;
+  background: yellow !important;
+}
+
+.image-with-boxes img {
+  border: 5px solid blue !important;
+  max-height: none !important;
+  height: auto !important;
+}
+
+/* Force all parent containers to not restrict height */
+.chat-messages,
+.message-container,
+.message,
+.message-content,
+.inventory-results {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+}
