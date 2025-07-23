@@ -843,6 +843,13 @@ export default function App() {
         
         try {
           const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze' : '/api/analyze');
+          console.log('Sending request to:', endpoint);
+          console.log('Request payload size:', JSON.stringify({
+            image: base64.substring(0, 50) + '...',
+            apiKey: 'sk-ant-...',
+            roomType: 'unknown'
+          }).length);
+          
           const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -852,6 +859,15 @@ export default function App() {
               roomType: 'unknown'
             })
           });
+          
+          console.log('Response status:', response.status);
+          console.log('Response headers:', response.headers);
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server error response:', errorText);
+            throw new Error(`Server error: ${response.status} - ${errorText}`);
+          }
           
           const data = await response.json();
           
@@ -868,9 +884,10 @@ export default function App() {
             }]);
           }
         } catch (error) {
+          console.error('Full error details:', error);
           setMessages(prev => [...prev, { 
             role: 'assistant', 
-            text: `Error: ${error.message}` 
+            text: `Error: ${error.message}. Please check the console for more details.` 
           }]);
         }
         
