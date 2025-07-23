@@ -122,7 +122,7 @@ const ItemCard = ({ item, index, onHighlight, onRemove }) => (
     <div className="item-value">{item.value}</div>
     <div className="item-details">
       <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || 'Quality item in good condition'}</p>
+      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
       <p><strong>Best time:</strong> {item.bestSeason || 'August-September (student moving season)'}</p>
     </div>
     <span className="confidence-badge">{item.confidence}% match</span>
@@ -377,11 +377,48 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.className = 'bounding-box';
         box.id = `box-${index}`;
         
-        // The API returns percentages, so we calculate based on displayed dimensions
-        const x = (item.boundingBox.x / 100) * displayWidth;
-        const y = (item.boundingBox.y / 100) * displayHeight;
-        const width = (item.boundingBox.width / 100) * displayWidth;
-        const height = (item.boundingBox.height / 100) * displayHeight;
+        // Parse the bounding box values
+        let x, y, width, height;
+        
+        // Check if coordinates are normalized (0-1) or percentages (0-100)
+        if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
+            item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
+          // Normalized coordinates (0-1)
+          x = item.boundingBox.x * displayWidth;
+          y = item.boundingBox.y * displayHeight;
+          width = item.boundingBox.width * displayWidth;
+          height = item.boundingBox.height * displayHeight;
+        } else if (item.boundingBox.x <= 100) {
+          // Percentage coordinates (0-100)
+          x = (item.boundingBox.x / 100) * displayWidth;
+          y = (item.boundingBox.y / 100) * displayHeight;
+          width = (item.boundingBox.width / 100) * displayWidth;
+          height = (item.boundingBox.height / 100) * displayHeight;
+        } else {
+          // Absolute pixel coordinates - scale to display size
+          const scaleX = displayWidth / img.naturalWidth;
+          const scaleY = displayHeight / img.naturalHeight;
+          x = item.boundingBox.x * scaleX;
+          y = item.boundingBox.y * scaleY;
+          width = item.boundingBox.width * scaleX;
+          height = item.boundingBox.height * scaleY;
+        }
+        
+        // Apply tight bounding box (remove excessive padding)
+        // Reduce box size by 10% to create tighter bounds
+        const padding = 0.05; // 5% padding instead of whatever the API added
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
+        width = width * (1 - padding * 2);
+        height = height * (1 - padding * 2);
+        x = centerX - width / 2;
+        y = centerY - height / 2;
+        
+        // Ensure boxes stay within image bounds
+        x = Math.max(0, Math.min(x, displayWidth - width));
+        y = Math.max(0, Math.min(y, displayHeight - height));
+        width = Math.min(width, displayWidth - x);
+        height = Math.min(height, displayHeight - y);
         
         box.style.left = x + 'px';
         box.style.top = y + 'px';
@@ -396,7 +433,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.onclick = () => highlightBox(index);
         
         container.appendChild(box);
-        console.log(`Drew box ${index} at ${x},${y} size ${width}x${height}`);
+        console.log(`Drew box ${index} at ${x},${y} size ${width}x${height} (original: ${item.boundingBox.x}, ${item.boundingBox.y})`);
       }
     });
   };
@@ -418,11 +455,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       return;
     }
     
-    // Calculate the scale between natural and display size
-    const scaleX = img.naturalWidth / img.clientWidth;
-    const scaleY = img.naturalHeight / img.clientHeight;
-    
-    console.log('Generating thumbnails - Scale:', scaleX, 'x', scaleY);
+    console.log('Generating thumbnails - Natural size:', img.naturalWidth, 'x', img.naturalHeight);
+    console.log('Display size:', img.clientWidth, 'x', img.clientHeight);
     
     items.forEach((item, index) => {
       if (item.boundingBox && !item.removed) {
@@ -436,28 +470,44 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           canvas.width = 300;
           canvas.height = 200;
           
-          // Calculate source rectangle from percentage coordinates
-          const padding = 0.05; // 5% padding
+          // Parse coordinates based on their format
+          let sourceX, sourceY, sourceWidth, sourceHeight;
           
-          // Convert percentage to display pixels, then to natural pixels
-          let displayX = (item.boundingBox.x / 100) * img.clientWidth;
-          let displayY = (item.boundingBox.y / 100) * img.clientHeight;
-          let displayWidth = (item.boundingBox.width / 100) * img.clientWidth;
-          let displayHeight = (item.boundingBox.height / 100) * img.clientHeight;
+          if (item.boundingBox.x <= 1 && item.boundingBox.y <= 1 && 
+              item.boundingBox.width <= 1 && item.boundingBox.height <= 1) {
+            // Normalized coordinates (0-1)
+            sourceX = item.boundingBox.x * img.naturalWidth;
+            sourceY = item.boundingBox.y * img.naturalHeight;
+            sourceWidth = item.boundingBox.width * img.naturalWidth;
+            sourceHeight = item.boundingBox.height * img.naturalHeight;
+          } else if (item.boundingBox.x <= 100) {
+            // Percentage coordinates (0-100)
+            sourceX = (item.boundingBox.x / 100) * img.naturalWidth;
+            sourceY = (item.boundingBox.y / 100) * img.naturalHeight;
+            sourceWidth = (item.boundingBox.width / 100) * img.naturalWidth;
+            sourceHeight = (item.boundingBox.height / 100) * img.naturalHeight;
+          } else {
+            // Absolute pixel coordinates
+            sourceX = item.boundingBox.x;
+            sourceY = item.boundingBox.y;
+            sourceWidth = item.boundingBox.width;
+            sourceHeight = item.boundingBox.height;
+          }
           
-          // Convert to natural image coordinates
-          let sourceX = displayX * scaleX;
-          let sourceY = displayY * scaleY;
-          let sourceWidth = displayWidth * scaleX;
-          let sourceHeight = displayHeight * scaleY;
+          // Apply tighter crop (remove excessive padding from API)
+          const cropPadding = 0.05; // 5% padding
+          const centerX = sourceX + sourceWidth / 2;
+          const centerY = sourceY + sourceHeight / 2;
+          sourceWidth = sourceWidth * (1 - cropPadding * 2);
+          sourceHeight = sourceHeight * (1 - cropPadding * 2);
+          sourceX = centerX - sourceWidth / 2;
+          sourceY = centerY - sourceHeight / 2;
           
-          // Add padding
-          const padX = sourceWidth * padding;
-          const padY = sourceHeight * padding;
-          sourceX = Math.max(0, sourceX - padX);
-          sourceY = Math.max(0, sourceY - padY);
-          sourceWidth = Math.min(img.naturalWidth - sourceX, sourceWidth + 2 * padX);
-          sourceHeight = Math.min(img.naturalHeight - sourceY, sourceHeight + 2 * padY);
+          // Ensure we don't go outside image bounds
+          sourceX = Math.max(0, sourceX);
+          sourceY = Math.max(0, sourceY);
+          sourceWidth = Math.min(sourceWidth, img.naturalWidth - sourceX);
+          sourceHeight = Math.min(sourceHeight, img.naturalHeight - sourceY);
           
           // Clear canvas
           ctx.fillStyle = 'white';
@@ -481,7 +531,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
           thumbnailImg.src = dataUrl;
           
-          console.log(`Generated thumbnail ${index}`);
+          console.log(`Generated thumbnail ${index} from source (${Math.round(sourceX)},${Math.round(sourceY)}) size ${Math.round(sourceWidth)}x${Math.round(sourceHeight)}`);
           
         } catch (err) {
           console.error(`Failed to generate thumbnail ${index}:`, err);
