@@ -39,6 +39,7 @@ body {
   display: flex;
   flex-direction: column;
   transition: margin-left 0.3s ease;
+  flex-shrink: 0;
 }
 
 .sidebar-header {
@@ -111,6 +112,7 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
 }
 
 .chat-header {
@@ -120,6 +122,7 @@ body {
   align-items: center;
   padding: 0 24px;
   background-color: white;
+  flex-shrink: 0;
 }
 
 .model-selector {
@@ -142,13 +145,16 @@ body {
   font-size: 14px;
 }
 
+/* CRITICAL: Make chat messages scrollable */
 .chat-messages {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: auto !important;
+  overflow-x: hidden;
   padding: 40px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 0; /* Important for Firefox */
 }
 
 .message-container {
@@ -188,7 +194,6 @@ body {
 .message-content {
   flex: 1;
   line-height: 1.6;
-  /* REMOVED any max-height constraints */
 }
 
 .message-text {
@@ -252,6 +257,7 @@ body {
   border-top: 1px solid var(--border-color);
   background-color: white;
   padding: 24px;
+  flex-shrink: 0;
 }
 
 .input-wrapper {
@@ -362,7 +368,6 @@ body {
   padding: 24px 0;
   margin-top: 16px;
   width: 100%;
-  /* REMOVED any height constraints */
 }
 
 .total-value {
@@ -394,6 +399,7 @@ body {
   flex-direction: column;
   gap: 20px;
   margin-top: 30px;
+  margin-bottom: 40px; /* Add space at bottom */
 }
 
 .item-row {
@@ -599,14 +605,13 @@ body {
   transform: translateY(-1px);
 }
 
-/* CRITICAL FIX: Bounding box overlay and image display */
+/* CRITICAL: Natural image display without constraints */
 .image-with-boxes {
   position: relative;
   display: block;
   max-width: 800px;
   margin: 20px auto;
   text-align: center;
-  /* Allow container to grow to natural image height */
   height: auto !important;
   overflow: visible;
 }
@@ -616,9 +621,9 @@ body {
   height: auto !important;
   display: block;
   margin: 0 auto;
-  /* REMOVED max-height constraint that was causing the squishing */
-  /* REMOVED object-fit to let image display naturally */
   max-width: 100%;
+  /* NO max-height constraint */
+  /* NO object-fit property */
 }
 
 .bounding-box {
@@ -720,26 +725,4 @@ body {
 
 .hidden {
   display: none;
-}
-/* TEMPORARY DEBUG - Remove after fixing */
-.image-with-boxes {
-  border: 5px solid red !important;
-  background: yellow !important;
-}
-
-.image-with-boxes img {
-  border: 5px solid blue !important;
-  max-height: none !important;
-  height: auto !important;
-}
-
-/* Force all parent containers to not restrict height */
-.chat-messages,
-.message-container,
-.message,
-.message-content,
-.inventory-results {
-  max-height: none !important;
-  height: auto !important;
-  overflow: visible !important;
 }

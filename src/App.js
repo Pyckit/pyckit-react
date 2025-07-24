@@ -318,7 +318,6 @@ const ItemEditor = ({ item, index, onList, showProcessAll }) => {
 const ImageAnalysis = ({ analysisData, imageFile }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
-  const containerRef = useRef(null);
   
   // Process items to handle duplicate names
   const processItemsWithUniqueNames = (rawItems) => {
@@ -356,7 +355,6 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   const [items, setItems] = useState(processItemsWithUniqueNames(analysisData.items || []));
   const [totalValue, setTotalValue] = useState(analysisData.totalValue || 0);
   const [imageReady, setImageReady] = useState(false);
-  const [imageDimensions, setImageDimensions] = useState({ natural: null, display: null });
   
   useEffect(() => {
     if (imageFile && imageRef.current) {
@@ -401,8 +399,8 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   }, [imageFile]);
   
   useEffect(() => {
-    if (imageReady && items.length > 0 && imageDimensions.display) {
-      // Wait a bit more to ensure DOM is updated
+    if (imageReady && items.length > 0) {
+      // Wait a bit to ensure DOM is updated
       const timer = setTimeout(() => {
         drawBoundingBoxes();
         generateThumbnails();
@@ -410,33 +408,53 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       
       return () => clearTimeout(timer);
     }
-  }, [imageReady, items, imageDimensions]);
+  }, [imageReady, items]);
   
   const drawBoundingBoxes = () => {
-    const container = containerRef.current;
+    const container = document.getElementById('imageWithBoxes');
     const img = imageRef.current;
     
-    if (!container || !img || !imageDimensions.display) {
-      console.log('Container, image, or dimensions not ready');
+    if (!container || !img) {
+      console.log('Container or image not found');
+      return;
+    }
+    
+    // Check if image has real dimensions
+    if (!img.complete || img.clientWidth === 0 || img.naturalWidth === 0) {
+      console.log('Image not ready yet, will retry...');
+      setTimeout(drawBoundingBoxes, 100);
       return;
     }
     
     // Clear existing boxes
     container.querySelectorAll('.bounding-box').forEach(box => box.remove());
     
-    // Use the stored dimensions
-    const displayWidth = imageDimensions.display.width;
-    const displayHeight = imageDimensions.display.height;
-    const naturalWidth = imageDimensions.natural.width;
-    const naturalHeight = imageDimensions.natural.height;
+    // Get the actual displayed dimensions
+    const displayWidth = img.clientWidth;
+    const displayHeight = img.clientHeight;
     
-    console.log('=== BOUNDING BOX DRAWING ===');
-    console.log('Using dimensions:', { natural: imageDimensions.natural, display: imageDimensions.display });
+    console.log('=== BOUNDING BOX DEBUG ===');
+    console.log('Image Natural Dimensions:', img.naturalWidth, 'x', img.naturalHeight);
+    console.log('Image Display Dimensions:', displayWidth, 'x', displayHeight);
+    console.log('Number of items:', items.length);
     
     items.forEach((item, index) => {
       if (item.boundingBox && !item.removed) {
         console.log(`\n--- Item ${index}: ${item.name} ---`);
         console.log('Raw boundingBox data:', JSON.stringify(item.boundingBox));
+        
+        // Add visual debugging - color code boxes by item type
+        let boxColor = 'var(--primary-color)'; // default yellow
+        const itemNameLower = item.name.toLowerCase();
+        if (itemNameLower.includes('lamp')) {
+          boxColor = '#FF6B6B'; // red for lamps
+        } else if (itemNameLower.includes('chair')) {
+          boxColor = '#4ECDC4'; // teal for chairs
+        } else if (itemNameLower.includes('art') || itemNameLower.includes('print')) {
+          boxColor = '#95E1D3'; // light green for art
+        } else if (itemNameLower.includes('table')) {
+          boxColor = '#F38181'; // pink for tables
+        }
         
         const box = document.createElement('div');
         box.className = 'bounding-box';
@@ -445,55 +463,40 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.style.pointerEvents = 'auto';
         box.style.cursor = 'pointer';
         
-        // CRITICAL: The coordinates are percentages based on the NATURAL image dimensions
-        // We need to map them to the DISPLAY dimensions
+        // SIMPLIFIED COORDINATE CALCULATION
         let x, y, width, height;
         
+        // Handle x/y/width/height format with percentages
         if (item.boundingBox.x <= 100) {
-          // Percentage coordinates (0-100)
-          // First, convert percentages to natural pixel coordinates
-          const naturalX = (item.boundingBox.x / 100) * naturalWidth;
-          const naturalY = (item.boundingBox.y / 100) * naturalHeight;
-          const naturalBoxWidth = (item.boundingBox.width / 100) * naturalWidth;
-          const naturalBoxHeight = (item.boundingBox.height / 100) * naturalHeight;
+          // Direct percentage to pixel conversion
+          x = (item.boundingBox.x / 100) * displayWidth;
+          y = (item.boundingBox.y / 100) * displayHeight;
+          width = (item.boundingBox.width / 100) * displayWidth;
+          height = (item.boundingBox.height / 100) * displayHeight;
           
-          // Then scale to display coordinates
-          const scaleX = displayWidth / naturalWidth;
-          const scaleY = displayHeight / naturalHeight;
-          
-          x = naturalX * scaleX;
-          y = naturalY * scaleY;
-          width = naturalBoxWidth * scaleX;
-          height = naturalBoxHeight * scaleY;
-          
-          console.log('Natural coords:', { x: naturalX, y: naturalY, w: naturalBoxWidth, h: naturalBoxHeight });
-          console.log('Scale factors:', { scaleX, scaleY });
-          console.log('Display coords:', { x, y, width, height });
+          console.log('Using simple percentage conversion');
+          console.log(`Percentages: x=${item.boundingBox.x}%, y=${item.boundingBox.y}%, w=${item.boundingBox.width}%, h=${item.boundingBox.height}%`);
+          console.log(`Pixels: x=${x}, y=${y}, w=${width}, h=${height}`);
         }
         
-        // Add padding for background removal
-        const padding = 0.2;
+        // ADD PADDING for background removal (20% extra on all sides)
+        const padding = 0.2; // 20% padding
         const padX = width * padding;
         const padY = height * padding;
         
+        // Expand the box by padding amount
         x = x - padX;
         y = y - padY;
         width = width + (padX * 2);
         height = height + (padY * 2);
         
-        // Ensure boxes stay within bounds
+        console.log('After padding:', x, y, width, height);
+        
+        // Ensure boxes stay within image bounds
         x = Math.max(0, x);
         y = Math.max(0, y);
         width = Math.min(width, displayWidth - x);
         height = Math.min(height, displayHeight - y);
-        
-        // Color coding for debugging
-        let boxColor = 'var(--primary-color)';
-        const itemNameLower = item.name.toLowerCase();
-        if (itemNameLower.includes('lamp')) boxColor = '#FF6B6B';
-        else if (itemNameLower.includes('chair')) boxColor = '#4ECDC4';
-        else if (itemNameLower.includes('art') || itemNameLower.includes('print')) boxColor = '#95E1D3';
-        else if (itemNameLower.includes('table')) boxColor = '#F38181';
         
         box.style.left = x + 'px';
         box.style.top = y + 'px';
@@ -513,7 +516,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         container.appendChild(box);
       }
     });
-    console.log('=== END BOUNDING BOX DRAWING ===\n');
+    console.log('=== END BOUNDING BOX DEBUG ===\n');
   };
   
   const generateThumbnails = () => {
@@ -521,47 +524,66 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     const img = imageRef.current;
     const ctx = canvas?.getContext('2d');
     
-    if (!canvas || !ctx || !img || !imageDimensions.natural) {
-      console.log('Canvas, image, or dimensions not ready for thumbnails');
+    if (!canvas || !ctx || !img) {
+      console.log('Canvas or image not ready for thumbnails');
       return;
     }
     
-    const naturalWidth = imageDimensions.natural.width;
-    const naturalHeight = imageDimensions.natural.height;
+    // Check if image has real dimensions
+    if (!img.complete || img.naturalWidth === 0) {
+      console.log('Image not ready for thumbnails, will retry...');
+      setTimeout(generateThumbnails, 100);
+      return;
+    }
     
-    console.log('=== THUMBNAIL GENERATION ===');
-    console.log('Using natural dimensions:', naturalWidth, 'x', naturalHeight);
+    console.log('=== THUMBNAIL GENERATION DEBUG ===');
+    console.log('Natural size:', img.naturalWidth, 'x', img.naturalHeight);
+    console.log('Display size:', img.clientWidth, 'x', img.clientHeight);
     
     items.forEach((item, index) => {
       if (item.boundingBox && !item.removed) {
         const thumbnailImg = document.getElementById(`item-thumbnail-${index}`);
-        if (!thumbnailImg) return;
+        if (!thumbnailImg) {
+          console.log(`Thumbnail element ${index} not found`);
+          return;
+        }
         
         try {
+          console.log(`\nGenerating thumbnail ${index} for ${item.name}`);
           canvas.width = 300;
           canvas.height = 200;
           
-          // Convert percentage coordinates to natural pixel coordinates
-          let sourceX = (item.boundingBox.x / 100) * naturalWidth;
-          let sourceY = (item.boundingBox.y / 100) * naturalHeight;
-          let sourceWidth = (item.boundingBox.width / 100) * naturalWidth;
-          let sourceHeight = (item.boundingBox.height / 100) * naturalHeight;
+          // Convert percentages to natural pixel coordinates
+          let sourceX = (item.boundingBox.x / 100) * img.naturalWidth;
+          let sourceY = (item.boundingBox.y / 100) * img.naturalHeight;
+          let sourceWidth = (item.boundingBox.width / 100) * img.naturalWidth;
+          let sourceHeight = (item.boundingBox.height / 100) * img.naturalHeight;
           
-          // Apply padding
-          const cropPadding = 0.2;
+          console.log('Source coords before padding:', sourceX, sourceY, sourceWidth, sourceHeight);
+          
+          // Apply padding for background removal
+          const cropPadding = 0.2; // 20% padding
           const padX = sourceWidth * cropPadding;
           const padY = sourceHeight * cropPadding;
           
-          sourceX = Math.max(0, sourceX - padX);
-          sourceY = Math.max(0, sourceY - padY);
-          sourceWidth = Math.min(sourceWidth + (padX * 2), naturalWidth - sourceX);
-          sourceHeight = Math.min(sourceHeight + (padY * 2), naturalHeight - sourceY);
+          sourceX = sourceX - padX;
+          sourceY = sourceY - padY;
+          sourceWidth = sourceWidth + (padX * 2);
+          sourceHeight = sourceHeight + (padY * 2);
+          
+          // Ensure we don't go outside image bounds
+          sourceX = Math.max(0, sourceX);
+          sourceY = Math.max(0, sourceY);
+          sourceWidth = Math.min(sourceWidth, img.naturalWidth - sourceX);
+          sourceHeight = Math.min(sourceHeight, img.naturalHeight - sourceY);
+          
+          console.log('Source coords after padding:', sourceX, sourceY, sourceWidth, sourceHeight);
           
           // Clear canvas
           ctx.fillStyle = 'white';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           
-          // Calculate destination size
+          // Calculate destination size to fit canvas while maintaining aspect ratio
           const scale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight) * 0.9;
           const destWidth = sourceWidth * scale;
           const destHeight = sourceHeight * scale;
@@ -571,18 +593,21 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           // Draw the cropped region
           ctx.drawImage(
             img,
-            sourceX, sourceY, sourceWidth, sourceHeight,
-            destX, destY, destWidth, destHeight
+            sourceX, sourceY, sourceWidth, sourceHeight,  // Source rectangle
+            destX, destY, destWidth, destHeight  // Destination rectangle
           );
           
-          thumbnailImg.src = canvas.toDataURL('image/jpeg', 0.9);
+          // Convert to data URL and set as thumbnail source
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+          thumbnailImg.src = dataUrl;
           
         } catch (err) {
           console.error(`Failed to generate thumbnail ${index}:`, err);
+          thumbnailImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23f0f0f0"/%3E%3Ctext x="150" y="100" text-anchor="middle" fill="%23999" font-family="Arial" font-size="14"%3EThumbnail Error%3C/text%3E%3C/svg%3E';
         }
       }
     });
-    console.log('=== END THUMBNAIL GENERATION ===\n');
+    console.log('=== END THUMBNAIL DEBUG ===\n');
   };
   
   const highlightBox = (index) => {
@@ -617,29 +642,11 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   
   const handleImageLoad = () => {
     console.log('=== IMAGE LOAD EVENT ===');
-    const img = imageRef.current;
-    const container = containerRef.current;
+    console.log('Image element:', imageRef.current);
+    console.log('Natural dimensions:', imageRef.current?.naturalWidth, 'x', imageRef.current?.naturalHeight);
+    console.log('Display dimensions:', imageRef.current?.clientWidth, 'x', imageRef.current?.clientHeight);
     
-    if (!img || !container) return;
-    
-    // Store both natural and display dimensions
-    const naturalWidth = img.naturalWidth;
-    const naturalHeight = img.naturalHeight;
-    const displayWidth = img.clientWidth;
-    const displayHeight = img.clientHeight;
-    
-    console.log('Natural dimensions:', naturalWidth, 'x', naturalHeight);
-    console.log('Display dimensions:', displayWidth, 'x', displayHeight);
-    
-    // Store dimensions for later use
-    setImageDimensions({
-      natural: { width: naturalWidth, height: naturalHeight },
-      display: { width: displayWidth, height: displayHeight }
-    });
-    
-    // CRITICAL: Set the container height to match the image's actual displayed height
-    container.style.height = `${displayHeight}px`;
-    
+    // Just set image ready - let the image display naturally
     setImageReady(true);
   };
   
@@ -655,15 +662,13 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Prepare Listings</h3>
       
       <div 
-        ref={containerRef}
         className="image-with-boxes" 
         id="imageWithBoxes" 
         style={{ 
           maxWidth: 800, 
           margin: '0 auto', 
           position: 'relative',
-          backgroundColor: '#f5f5f5',
-          overflow: 'hidden'  // Prevent boxes from extending outside
+          backgroundColor: '#f5f5f5'
         }}
       >
         <img
@@ -673,8 +678,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           style={{ 
             width: '100%', 
             height: 'auto', 
-            display: 'block',
-            maxWidth: '100%'
+            display: 'block'
           }}
           onLoad={handleImageLoad}
         />
