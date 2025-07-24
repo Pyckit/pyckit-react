@@ -463,13 +463,13 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.style.pointerEvents = 'auto';
         box.style.cursor = 'pointer';
         
-        // CORRECTED: Use normalized coordinates (0-1) directly
-        let x = item.boundingBox.x * displayWidth;
-        let y = item.boundingBox.y * displayHeight;
-        let width = item.boundingBox.width * displayWidth;
-        let height = item.boundingBox.height * displayHeight;
+        // FIXED: Treat coordinates as percentages (0-100)
+        let x = (item.boundingBox.x / 100) * displayWidth;
+        let y = (item.boundingBox.y / 100) * displayHeight;
+        let width = (item.boundingBox.width / 100) * displayWidth;
+        let height = (item.boundingBox.height / 100) * displayHeight;
         
-        console.log(`Normalized coords: x=${item.boundingBox.x}, y=${item.boundingBox.y}, w=${item.boundingBox.width}, h=${item.boundingBox.height}`);
+        console.log(`Percentage coords: x=${item.boundingBox.x}%, y=${item.boundingBox.y}%, w=${item.boundingBox.width}%, h=${item.boundingBox.height}%`);
         console.log(`Pixels before padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
         
         // ADD PADDING for background removal (20% extra on all sides)
@@ -546,11 +546,11 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           canvas.width = 300;
           canvas.height = 200;
           
-          // CORRECTED: Use normalized coordinates (0-1) directly
-          let sourceX = item.boundingBox.x * img.naturalWidth;
-          let sourceY = item.boundingBox.y * img.naturalHeight;
-          let sourceWidth = item.boundingBox.width * img.naturalWidth;
-          let sourceHeight = item.boundingBox.height * img.naturalHeight;
+          // FIXED: Treat coordinates as percentages (0-100)
+          let sourceX = (item.boundingBox.x / 100) * img.naturalWidth;
+          let sourceY = (item.boundingBox.y / 100) * img.naturalHeight;
+          let sourceWidth = (item.boundingBox.width / 100) * img.naturalWidth;
+          let sourceHeight = (item.boundingBox.height / 100) * img.naturalHeight;
           
           console.log('Source coords before padding:', sourceX.toFixed(1), sourceY.toFixed(1), sourceWidth.toFixed(1), sourceHeight.toFixed(1));
           
