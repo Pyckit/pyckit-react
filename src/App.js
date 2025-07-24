@@ -250,8 +250,8 @@ async function processItemsLocally(items, imageFile, onProgress) {
         onProgress(i + 1, items.length, item.name);
         
         try {
-          // Calculate crop dimensions with padding
-          const padding = 0.4;
+          // Calculate crop dimensions with MORE padding
+          const padding = 0.6;  // 60% padding for better background removal
           let x = (item.boundingBox.x / 100) * img.width;
           let y = (item.boundingBox.y / 100) * img.height;
           let width = (item.boundingBox.width / 100) * img.width;
@@ -281,17 +281,24 @@ async function processItemsLocally(items, imageFile, onProgress) {
             removedBgBlob = croppedBlob;
           }
           
-          // Create final image with white background
+          // Create final image with LIGHT GRAY background
           const finalCanvas = document.createElement('canvas');
           const finalCtx = finalCanvas.getContext('2d');
           finalCanvas.width = width;
           finalCanvas.height = height;
           
-          // White background
-          finalCtx.fillStyle = 'white';
+          // Light gray background (better for white items)
+          finalCtx.fillStyle = '#f5f5f5';
           finalCtx.fillRect(0, 0, width, height);
           
-          // Draw transparent image on white background
+          // Optional: Add subtle gradient for more professional look
+          const gradient = finalCtx.createLinearGradient(0, 0, width, height);
+          gradient.addColorStop(0, '#f8f8f8');
+          gradient.addColorStop(1, '#eeeeee');
+          finalCtx.fillStyle = gradient;
+          finalCtx.fillRect(0, 0, width, height);
+          
+          // Draw transparent image on gray background
           const transparentImg = new Image();
           await new Promise((imgResolve) => {
             transparentImg.onload = () => {
