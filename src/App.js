@@ -463,21 +463,14 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         box.style.pointerEvents = 'auto';
         box.style.cursor = 'pointer';
         
-        // SIMPLIFIED COORDINATE CALCULATION
-        let x, y, width, height;
+        // CORRECTED: Use normalized coordinates (0-1) directly
+        let x = item.boundingBox.x * displayWidth;
+        let y = item.boundingBox.y * displayHeight;
+        let width = item.boundingBox.width * displayWidth;
+        let height = item.boundingBox.height * displayHeight;
         
-        // Handle x/y/width/height format with percentages
-        if (item.boundingBox.x <= 100) {
-          // Direct percentage to pixel conversion
-          x = (item.boundingBox.x / 100) * displayWidth;
-          y = (item.boundingBox.y / 100) * displayHeight;
-          width = (item.boundingBox.width / 100) * displayWidth;
-          height = (item.boundingBox.height / 100) * displayHeight;
-          
-          console.log('Using simple percentage conversion');
-          console.log(`Percentages: x=${item.boundingBox.x}%, y=${item.boundingBox.y}%, w=${item.boundingBox.width}%, h=${item.boundingBox.height}%`);
-          console.log(`Pixels: x=${x}, y=${y}, w=${width}, h=${height}`);
-        }
+        console.log(`Normalized coords: x=${item.boundingBox.x}, y=${item.boundingBox.y}, w=${item.boundingBox.width}, h=${item.boundingBox.height}`);
+        console.log(`Pixels before padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
         
         // ADD PADDING for background removal (20% extra on all sides)
         const padding = 0.2; // 20% padding
@@ -490,7 +483,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         width = width + (padX * 2);
         height = height + (padY * 2);
         
-        console.log('After padding:', x, y, width, height);
+        console.log(`After padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
         
         // Ensure boxes stay within image bounds
         x = Math.max(0, x);
@@ -553,13 +546,13 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           canvas.width = 300;
           canvas.height = 200;
           
-          // Convert percentages to natural pixel coordinates
-          let sourceX = (item.boundingBox.x / 100) * img.naturalWidth;
-          let sourceY = (item.boundingBox.y / 100) * img.naturalHeight;
-          let sourceWidth = (item.boundingBox.width / 100) * img.naturalWidth;
-          let sourceHeight = (item.boundingBox.height / 100) * img.naturalHeight;
+          // CORRECTED: Use normalized coordinates (0-1) directly
+          let sourceX = item.boundingBox.x * img.naturalWidth;
+          let sourceY = item.boundingBox.y * img.naturalHeight;
+          let sourceWidth = item.boundingBox.width * img.naturalWidth;
+          let sourceHeight = item.boundingBox.height * img.naturalHeight;
           
-          console.log('Source coords before padding:', sourceX, sourceY, sourceWidth, sourceHeight);
+          console.log('Source coords before padding:', sourceX.toFixed(1), sourceY.toFixed(1), sourceWidth.toFixed(1), sourceHeight.toFixed(1));
           
           // Apply padding for background removal
           const cropPadding = 0.2; // 20% padding
@@ -577,7 +570,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           sourceWidth = Math.min(sourceWidth, img.naturalWidth - sourceX);
           sourceHeight = Math.min(sourceHeight, img.naturalHeight - sourceY);
           
-          console.log('Source coords after padding:', sourceX, sourceY, sourceWidth, sourceHeight);
+          console.log('Source coords after padding:', sourceX.toFixed(1), sourceY.toFixed(1), sourceWidth.toFixed(1), sourceHeight.toFixed(1));
           
           // Clear canvas
           ctx.fillStyle = 'white';
