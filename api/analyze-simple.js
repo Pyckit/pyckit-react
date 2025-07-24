@@ -1,6 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
+const Anthropic = require('@anthropic-ai/sdk');
 
-export const config = {
+module.exports.config = {
   api: {
     bodyParser: {
       sizeLimit: '50mb',
@@ -8,7 +8,7 @@ export const config = {
   },
 };
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
