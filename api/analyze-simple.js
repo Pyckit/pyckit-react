@@ -1,12 +1,4 @@
-const Anthropic = require('@anthropic-ai/sdk');
-
-module.exports.config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-  },
-};
+const { Anthropic } = require('@anthropic-ai/sdk');
 
 module.exports = async function handler(req, res) {
   // Set CORS headers
@@ -28,15 +20,21 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    console.log('Request method:', req.method);
+    console.log('Request body keys:', Object.keys(req.body || {}));
+    console.log('Image data present:', !!(req.body && req.body.image));
+    console.log('Image data length:', req.body?.image?.length || 0);
+    
     const { image, roomType } = req.body;
     
-    // Use environment variable instead of client-sent API key
+    // Use environment variable
     const apiKey = process.env.ClaudeKey;
     
     if (!image) {
+      console.error('No image data received');
       return res.status(400).json({ 
         success: false, 
-        error: 'Missing image' 
+        error: 'Missing image data' 
       });
     }
     
@@ -50,10 +48,16 @@ module.exports = async function handler(req, res) {
 
     console.log('Starting room analysis...');
     console.log(`Room type: ${roomType || 'unknown'}`);
+    console.log('API Key present:', !!apiKey);
+    console.log('API Key length:', apiKey.length);
+    console.log('Image is base64:', typeof image === 'string');
+    console.log('Image length:', image.length);
 
     // AI detection using Claude
+    console.log('Creating Anthropic client...');
     const anthropic = new Anthropic({ apiKey });
     
+    console.log('Sending request to Claude...');
     const message = await anthropic.messages.create({
       model: "claude-3-5-sonnet-20241022",
       max_tokens: 1024,
@@ -87,7 +91,7 @@ module.exports = async function handler(req, res) {
                 "confidence": 85
               }
             ]`
-          },
+          },,
           {
             type: "image",
             source: {
@@ -101,6 +105,8 @@ module.exports = async function handler(req, res) {
     });
 
     console.log('AI Response received');
+    console.log('Response type:', typeof message.content[0].text);
+    console.log('Response length:', message.content[0].text.length);
     
     // Parse the response
     let cleanedResponse = message.content[0].text;
@@ -153,9 +159,19 @@ module.exports = async function handler(req, res) {
 
   } catch (error) {
     console.error('Analysis error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      error: error.message || 'Analysis failed'
+      error: error.message || 'Analysis failed',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-}
+};
+
+module.exports.config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb',
+    },
+  },
+};
