@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { SpeedInsights } from "@vercel/speed-insights/react";
+import { removeBackground } from '@imgly/background-removal';
 
 // Utility functions
 const API_URL = window.location.hostname === 'localhost' 
@@ -46,10 +47,10 @@ const WelcomeScreen = ({ onFileSelect }) => {
         <h3 style={{ color: '#92400E', marginBottom: 8 }}>💡 How it works:</h3>
         <ol style={{ color: '#92400E', marginLeft: 20, lineHeight: 1.8 }}>
           <li>Take a clear photo of any room in your house</li>
-          <li>Our AI identifies all sellable items with bounding boxes</li>
-          <li>Get Calgary market prices for each item</li>
-          <li>Edit listings and export individual items</li>
-          <li>Discover your room's hidden value!</li>
+          <li>Our AI identifies all sellable items automatically</li>
+          <li>Background removal happens instantly in your browser (FREE!)</li>
+          <li>Get Calgary market prices and descriptions</li>
+          <li>Download professional product photos ready for listing</li>
         </ol>
       </div>
       
@@ -82,6 +83,9 @@ const ApiKeyPrompt = ({ onSave }) => {
       <p style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
         To use Pyckit, you'll need a Claude API key from Anthropic.
       </p>
+      <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20, fontStyle: 'italic' }}>
+        ✨ Good news: Background removal is now FREE and runs in your browser!
+      </p>
       <input
         type="password"
         placeholder="sk-ant-api03-..."
@@ -112,541 +116,93 @@ const ApiKeyPrompt = ({ onSave }) => {
   );
 };
 
-const ItemCard = ({ item, index, onHighlight, onRemove }) => (
-  <div className="item-card" onClick={() => onHighlight(index)}>
-    <button className="remove-item-btn" onClick={(e) => { e.stopPropagation(); onRemove(index); }}>
-      ×
-    </button>
-    <img className="item-thumbnail-large" id={`item-thumbnail-${index}`} alt={item.name} />
-    <div className="item-name">{item.name}</div>
-    <div className="item-value">{item.value}</div>
-    <div className="item-details">
-      <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
-      <p><strong>Best time:</strong> {item.bestSeason || 'August-September (student moving season)'}</p>
+const ProcessingStatus = ({ current, total, currentItem }) => (
+  <div style={{
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    background: 'white',
+    padding: 40,
+    borderRadius: 12,
+    boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
+    zIndex: 1000,
+    textAlign: 'center',
+    minWidth: 400
+  }}>
+    <h3 style={{ marginBottom: 20 }}>Processing Items...</h3>
+    <div style={{
+      width: '100%',
+      height: 20,
+      backgroundColor: '#f0f0f0',
+      borderRadius: 10,
+      overflow: 'hidden',
+      marginBottom: 20
+    }}>
+      <div style={{
+        width: `${(current / total) * 100}%`,
+        height: '100%',
+        backgroundColor: 'var(--primary-color)',
+        transition: 'width 0.3s ease'
+      }} />
     </div>
-    <span className="confidence-badge">{item.confidence}% match</span>
+    <p style={{ color: 'var(--text-secondary)' }}>
+      Processing item {current} of {total}
+    </p>
+    {currentItem && (
+      <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 10 }}>
+        {currentItem}
+      </p>
+    )}
   </div>
 );
 
-const ItemEditor = ({ item, index, onList, showProcessAll }) => {
-  const [title, setTitle] = useState(item.listingTitle || item.name);
-  const [price, setPrice] = useState(parseFloat(String(item.value).replace(/[^0-9.-]+/g, '')) || 0);
-  const [condition, setCondition] = useState(item.condition || 'Good');
-  
-  // Generate a more detailed default description
-  const generateDetailedDescription = () => {
-    const baseDesc = item.description || '';
-    if (baseDesc.length > 100) return baseDesc; // Already very detailed
-    
-    // Extract brand if present in name
-    const itemLower = item.name.toLowerCase();
-    const hasBrand = itemLower.includes('ikea') || itemLower.includes('malm') || 
-                     itemLower.includes('hemnes') || itemLower.includes('kallax');
-    
-    // Start with condition and full name
-    let enhanced = `${condition} condition ${item.name}`;
-    
-    // Add material details if mentioned
-    if (item.name.includes('Oak Veneer') || item.name.includes('oak veneer')) {
-      enhanced = enhanced.replace('Oak Veneer', '(oak veneer)');
-    }
-    
-    // Add specific details based on item type
-    if (itemLower.includes('dresser') || itemLower.includes('drawer')) {
-      const drawerCount = item.name.match(/(\d+)-drawer/i)?.[1] || 'multiple';
-      enhanced += `. Features ${drawerCount} drawers for ample storage space. Perfect for bedroom organization and adds a classic touch to any room.`;
-      
-      if (hasBrand) {
-        enhanced += ` Popular IKEA model known for quality and durability.`;
-      }
-      
-      enhanced += ` Dimensions suitable for most bedrooms. All drawers slide smoothly. Well-maintained with no structural damage. Clean and ready for immediate use.`;
-      
-      if (condition === 'Excellent' || condition === 'Very Good') {
-        enhanced += ` Minimal signs of wear - looks nearly new.`;
-      }
-      
-    } else if (itemLower.includes('table')) {
-      enhanced += `. Sturdy construction ideal for dining or workspace.`;
-      
-      if (itemLower.includes('dining')) {
-        enhanced += ` Seats 4-6 people comfortably. Perfect for family meals or entertaining.`;
-      } else if (itemLower.includes('coffee')) {
-        enhanced += ` Ideal height for living room use. Ample surface for drinks, books, and decor.`;
-      }
-      
-      enhanced += ` Surface in good condition with normal wear consistent with age. Legs are stable with no wobbling. Great addition to any home.`;
-      
-    } else if (itemLower.includes('chair') || itemLower.includes('sofa')) {
-      enhanced += `. Comfortable seating with good support.`;
-      
-      if (itemLower.includes('sofa')) {
-        const seats = item.name.match(/(\d+)[\s-]?seat/i)?.[1];
-        if (seats) {
-          enhanced += ` ${seats}-seater perfect for living room or family room.`;
-        }
-        enhanced += ` Cushions retain their shape well. Frame is solid and sturdy.`;
-      }
-      
-      enhanced += ` Upholstery/material in ${condition.toLowerCase()} condition with no major tears, stains, or damage. Non-smoking home. Perfect for living room, bedroom, or office use.`;
-      
-    } else if (itemLower.includes('lamp') || itemLower.includes('light')) {
-      enhanced += `. Fully functional with working bulb socket and switch. Adds perfect ambient lighting to any space.`;
-      
-      if (itemLower.includes('floor')) {
-        enhanced += ` Stable base prevents tipping. Adjustable height/angle for optimal lighting.`;
-      } else if (itemLower.includes('table')) {
-        enhanced += ` Compact size perfect for nightstand or side table use.`;
-      }
-      
-      enhanced += ` Cord in excellent condition with no fraying. Shade is clean and intact. Energy-efficient bulb compatible.`;
-      
-    } else if (itemLower.includes('shelf') || itemLower.includes('bookcase') || itemLower.includes('bookshelf')) {
-      const shelfCount = item.name.match(/(\d+)[\s-]?shelf/i)?.[1];
-      enhanced += `. Excellent for storage and display.`;
-      
-      if (shelfCount) {
-        enhanced += ` Features ${shelfCount} shelves for ample storage.`;
-      } else {
-        enhanced += ` Multiple shelves provide versatile storage options.`;
-      }
-      
-      if (itemLower.includes('kallax') || itemLower.includes('expedit')) {
-        enhanced += ` Popular IKEA cube storage system - perfect for books, bins, or display items.`;
-      }
-      
-      enhanced += ` Stable construction supports heavy books without sagging. Perfect for home office, living room, or bedroom. Easy to assemble/disassemble for transport.`;
-      
-    } else if (itemLower.includes('desk')) {
-      enhanced += `. Spacious work surface perfect for home office or study area. Sturdy construction supports computer equipment and office supplies.`;
-      
-      if (itemLower.includes('drawer')) {
-        enhanced += ` Built-in storage keeps workspace organized.`;
-      }
-      
-      enhanced += ` Height is comfortable for extended work sessions. Surface shows minimal wear. Cable management features help maintain clean setup.`;
-      
-    } else {
-      // Generic but still detailed fallback
-      enhanced += `. Quality item well-suited for home use. Shows normal wear consistent with age but remains fully functional.`;
-      
-      if (hasBrand) {
-        enhanced += ` Trusted brand known for durability and style.`;
-      }
-      
-      enhanced += ` Clean, well-maintained, and ready for immediate use. From smoke-free home.`;
-    }
-    
-    return enhanced;
-  };
-  
-  const [description, setDescription] = useState(generateDetailedDescription());
-  
-  const handleList = () => {
-    onList(index, { title, price, condition, description });
-  };
-  
-  return (
-    <div className="item-edit-section">
-      <div className="edit-header-row">
-        <h3 className="item-edit-header">Edit Listing #{index + 1}</h3>
-        {showProcessAll && (
-          <button className="process-all-button" onClick={() => alert('Process all items')}>
-            Process All Items
-          </button>
-        )}
-      </div>
-      
-      <div className="edit-field">
-        <label className="edit-label">Title</label>
-        <input
-          type="text"
-          className="edit-input"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          maxLength={60}
-        />
-      </div>
-      
-      <div className="edit-field">
-        <label className="edit-label">Price</label>
-        <input
-          type="number"
-          className={`edit-input ${price > 500 ? 'price-warning' : ''}`}
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          step={5}
-        />
-        {price > 500 && (
-          <small style={{ color: '#DC2626', fontSize: 12, marginTop: 4, display: 'block' }}>
-            ⚠️ High price - verify this item
-          </small>
-        )}
-      </div>
-      
-      <div className="edit-field">
-        <label className="edit-label">Condition</label>
-        <select
-          className="edit-input"
-          value={condition}
-          onChange={(e) => setCondition(e.target.value)}
-        >
-          <option value="Excellent">Excellent</option>
-          <option value="Very Good">Very Good</option>
-          <option value="Good">Good</option>
-          <option value="Fair">Fair</option>
-        </select>
-      </div>
-      
-      <div className="edit-field">
-        <label className="edit-label">Description</label>
-        <textarea
-          className="edit-textarea"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-      
-      <button className="process-button" onClick={handleList}>
-        List Item
-      </button>
+const ItemCard = ({ item, index }) => (
+  <div className="item-card">
+    <img 
+      className="item-thumbnail-large" 
+      src={item.processedImage || item.stagedImage || '#'}
+      alt={item.name}
+      style={{ backgroundColor: item.processedImage ? 'white' : '#f0f0f0' }}
+    />
+    <div className="item-name">{item.name}</div>
+    <div className="item-value">${item.value}</div>
+    <div className="item-details">
+      <p><strong>Condition:</strong> {item.condition}</p>
+      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
     </div>
-  );
-};
+    <span className="confidence-badge">{item.confidence}% match</span>
+    
+    {item.processed && (
+      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            const link = document.createElement('a');
+            link.download = `${item.name.replace(/\s+/g, '_')}_listing.jpg`;
+            link.href = item.processedImage;
+            link.click();
+          }}
+          style={{
+            padding: '6px 12px',
+            fontSize: 12,
+            background: 'var(--primary-color)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer'
+          }}
+        >
+          💾 Download
+        </button>
+      </div>
+    )}
+  </div>
+);
 
 const ImageAnalysis = ({ analysisData, imageFile }) => {
-  const canvasRef = useRef(null);
-  const imageRef = useRef(null);
-  
-  // Process items to handle duplicate names
-  const processItemsWithUniqueNames = (rawItems) => {
-    const nameCounts = {};
-    const processedItems = [];
-    
-    // First pass - count occurrences of each name
-    rawItems.forEach(item => {
-      const baseName = item.name;
-      nameCounts[baseName] = (nameCounts[baseName] || 0) + 1;
-    });
-    
-    // Second pass - add numbers to duplicates
-    const nameIndices = {};
-    rawItems.forEach(item => {
-      const baseName = item.name;
-      let finalName = baseName;
-      
-      if (nameCounts[baseName] > 1) {
-        // This name appears multiple times, add a number
-        nameIndices[baseName] = (nameIndices[baseName] || 0) + 1;
-        finalName = `${baseName} ${nameIndices[baseName]}`;
-      }
-      
-      processedItems.push({
-        ...item,
-        originalName: baseName,
-        name: finalName
-      });
-    });
-    
-    return processedItems;
-  };
-  
-  const [items, setItems] = useState(processItemsWithUniqueNames(analysisData.items || []));
-  const [totalValue, setTotalValue] = useState(analysisData.totalValue || 0);
-  const [imageReady, setImageReady] = useState(false);
-  
-  useEffect(() => {
-    if (imageFile && imageRef.current) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          // Standardize image size for consistent processing
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 800;
-          
-          let width = img.width;
-          let height = img.height;
-          
-          // Calculate scaling to fit within max dimensions while maintaining aspect ratio
-          if (width > MAX_WIDTH || height > MAX_HEIGHT) {
-            const widthRatio = MAX_WIDTH / width;
-            const heightRatio = MAX_HEIGHT / height;
-            const scale = Math.min(widthRatio, heightRatio);
-            
-            width = Math.round(width * scale);
-            height = Math.round(height * scale);
-          }
-          
-          // Create canvas to resize image
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          
-          // Set the resized image
-          imageRef.current.src = canvas.toDataURL('image/jpeg', 0.9);
-          
-          console.log(`Image standardized from ${img.width}x${img.height} to ${width}x${height}`);
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(imageFile);
-    }
-  }, [imageFile]);
-  
-  useEffect(() => {
-    if (imageReady && items.length > 0) {
-      // Wait a bit to ensure DOM is updated
-      const timer = setTimeout(() => {
-        drawBoundingBoxes();
-        generateThumbnails();
-      }, 100);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [imageReady, items]);
-  
-  const drawBoundingBoxes = () => {
-    const container = document.getElementById('imageWithBoxes');
-    const img = imageRef.current;
-    
-    if (!container || !img) {
-      console.log('Container or image not found');
-      return;
-    }
-    
-    // Check if image has real dimensions
-    if (!img.complete || img.clientWidth === 0 || img.naturalWidth === 0) {
-      console.log('Image not ready yet, will retry...');
-      setTimeout(drawBoundingBoxes, 100);
-      return;
-    }
-    
-    // Clear existing boxes
-    container.querySelectorAll('.bounding-box').forEach(box => box.remove());
-    
-    // Get the actual displayed dimensions
-    const displayWidth = img.clientWidth;
-    const displayHeight = img.clientHeight;
-    
-    console.log('=== BOUNDING BOX DEBUG ===');
-    console.log('Image Natural Dimensions:', img.naturalWidth, 'x', img.naturalHeight);
-    console.log('Image Display Dimensions:', displayWidth, 'x', displayHeight);
-    console.log('Number of items:', items.length);
-    
-    items.forEach((item, index) => {
-      if (item.boundingBox && !item.removed) {
-        console.log(`\n--- Item ${index}: ${item.name} ---`);
-        console.log('Raw boundingBox data:', JSON.stringify(item.boundingBox));
-        
-        // Add visual debugging - color code boxes by item type
-        let boxColor = 'var(--primary-color)'; // default yellow
-        const itemNameLower = item.name.toLowerCase();
-        if (itemNameLower.includes('lamp')) {
-          boxColor = '#FF6B6B'; // red for lamps
-        } else if (itemNameLower.includes('chair')) {
-          boxColor = '#4ECDC4'; // teal for chairs
-        } else if (itemNameLower.includes('art') || itemNameLower.includes('print')) {
-          boxColor = '#95E1D3'; // light green for art
-        } else if (itemNameLower.includes('table')) {
-          boxColor = '#F38181'; // pink for tables
-        }
-        
-        const box = document.createElement('div');
-        box.className = 'bounding-box';
-        box.id = `box-${index}`;
-        box.style.position = 'absolute';
-        box.style.pointerEvents = 'auto';
-        box.style.cursor = 'pointer';
-        
-        // FIXED: Treat coordinates as percentages (0-100)
-        let x = (item.boundingBox.x / 100) * displayWidth;
-        let y = (item.boundingBox.y / 100) * displayHeight;
-        let width = (item.boundingBox.width / 100) * displayWidth;
-        let height = (item.boundingBox.height / 100) * displayHeight;
-        
-        // IMPORTANT: If the API returns center-based coordinates, convert to top-left
-        // Uncomment these lines if boxes appear shifted:
-        // x = x - (width / 2);
-        // y = y - (height / 2);
-        
-        console.log(`Percentage coords: x=${item.boundingBox.x}%, y=${item.boundingBox.y}%, w=${item.boundingBox.width}%, h=${item.boundingBox.height}%`);
-        console.log(`Pixels before padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
-        
-        // ADD PADDING for background removal (20% extra on all sides)
-        const padding = 0.2; // 20% padding
-        const padX = width * padding;
-        const padY = height * padding;
-        
-        // Expand the box by padding amount
-        x = x - padX;
-        y = y - padY;
-        width = width + (padX * 2);
-        height = height + (padY * 2);
-        
-        console.log(`After padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
-        
-        // Ensure boxes stay within image bounds
-        x = Math.max(0, x);
-        y = Math.max(0, y);
-        width = Math.min(width, displayWidth - x);
-        height = Math.min(height, displayHeight - y);
-        
-        box.style.left = x + 'px';
-        box.style.top = y + 'px';
-        box.style.width = width + 'px';
-        box.style.height = height + 'px';
-        box.style.borderColor = boxColor;
-        box.style.borderWidth = '3px';
-        box.style.borderStyle = 'solid';
-        
-        const label = document.createElement('div');
-        label.className = 'box-label';
-        label.textContent = `${index + 1}. ${item.name}`;
-        box.appendChild(label);
-        
-        box.onclick = () => highlightBox(index);
-        
-        container.appendChild(box);
-      }
-    });
-    console.log('=== END BOUNDING BOX DEBUG ===\n');
-  };
-  
-  const generateThumbnails = () => {
-    const canvas = canvasRef.current;
-    const img = imageRef.current;
-    const ctx = canvas?.getContext('2d');
-    
-    if (!canvas || !ctx || !img) {
-      console.log('Canvas or image not ready for thumbnails');
-      return;
-    }
-    
-    // Check if image has real dimensions
-    if (!img.complete || img.naturalWidth === 0) {
-      console.log('Image not ready for thumbnails, will retry...');
-      setTimeout(generateThumbnails, 100);
-      return;
-    }
-    
-    console.log('=== THUMBNAIL GENERATION DEBUG ===');
-    console.log('Natural size:', img.naturalWidth, 'x', img.naturalHeight);
-    console.log('Display size:', img.clientWidth, 'x', img.clientHeight);
-    
-    items.forEach((item, index) => {
-      if (item.boundingBox && !item.removed) {
-        const thumbnailImg = document.getElementById(`item-thumbnail-${index}`);
-        if (!thumbnailImg) {
-          console.log(`Thumbnail element ${index} not found`);
-          return;
-        }
-        
-        try {
-          console.log(`\nGenerating thumbnail ${index} for ${item.name}`);
-          canvas.width = 300;
-          canvas.height = 200;
-          
-          // FIXED: Treat coordinates as percentages (0-100)
-          let sourceX = (item.boundingBox.x / 100) * img.naturalWidth;
-          let sourceY = (item.boundingBox.y / 100) * img.naturalHeight;
-          let sourceWidth = (item.boundingBox.width / 100) * img.naturalWidth;
-          let sourceHeight = (item.boundingBox.height / 100) * img.naturalHeight;
-          
-          console.log('Source coords before padding:', sourceX.toFixed(1), sourceY.toFixed(1), sourceWidth.toFixed(1), sourceHeight.toFixed(1));
-          
-          // Apply padding for background removal
-          const cropPadding = 0.2; // 20% padding
-          const padX = sourceWidth * cropPadding;
-          const padY = sourceHeight * cropPadding;
-          
-          sourceX = sourceX - padX;
-          sourceY = sourceY - padY;
-          sourceWidth = sourceWidth + (padX * 2);
-          sourceHeight = sourceHeight + (padY * 2);
-          
-          // Ensure we don't go outside image bounds
-          sourceX = Math.max(0, sourceX);
-          sourceY = Math.max(0, sourceY);
-          sourceWidth = Math.min(sourceWidth, img.naturalWidth - sourceX);
-          sourceHeight = Math.min(sourceHeight, img.naturalHeight - sourceY);
-          
-          console.log('Source coords after padding:', sourceX.toFixed(1), sourceY.toFixed(1), sourceWidth.toFixed(1), sourceHeight.toFixed(1));
-          
-          // Clear canvas
-          ctx.fillStyle = 'white';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Calculate destination size to fit canvas while maintaining aspect ratio
-          const scale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight) * 0.9;
-          const destWidth = sourceWidth * scale;
-          const destHeight = sourceHeight * scale;
-          const destX = (canvas.width - destWidth) / 2;
-          const destY = (canvas.height - destHeight) / 2;
-          
-          // Draw the cropped region
-          ctx.drawImage(
-            img,
-            sourceX, sourceY, sourceWidth, sourceHeight,  // Source rectangle
-            destX, destY, destWidth, destHeight  // Destination rectangle
-          );
-          
-          // Convert to data URL and set as thumbnail source
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-          thumbnailImg.src = dataUrl;
-          
-        } catch (err) {
-          console.error(`Failed to generate thumbnail ${index}:`, err);
-          thumbnailImg.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23f0f0f0"/%3E%3Ctext x="150" y="100" text-anchor="middle" fill="%23999" font-family="Arial" font-size="14"%3EThumbnail Error%3C/text%3E%3C/svg%3E';
-        }
-      }
-    });
-    console.log('=== END THUMBNAIL DEBUG ===\n');
-  };
-  
-  const highlightBox = (index) => {
-    document.querySelectorAll('.bounding-box').forEach(box => {
-      box.style.borderColor = 'var(--primary-color)';
-      box.style.borderWidth = '3px';
-    });
-    
-    const box = document.getElementById(`box-${index}`);
-    if (box) {
-      box.style.borderColor = '#FF6B6B';
-      box.style.borderWidth = '4px';
-    }
-    
-    const itemRow = document.getElementById(`item-row-${index}`);
-    itemRow?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
-  
-  const removeItem = (index) => {
-    const updatedItems = [...items];
-    updatedItems[index].removed = true;
-    setItems(updatedItems);
-    
-    const price = parseFloat(String(items[index].value).replace(/[^0-9.-]+/g, '')) || 0;
-    setTotalValue(totalValue - price);
-  };
-  
-  const listItem = (index, data) => {
-    console.log(`Listing item ${index}:`, data);
-    alert(`Item listed!\n\nTitle: ${data.title}\nPrice: $${data.price}\nCondition: ${data.condition}`);
-  };
-  
-  const handleImageLoad = () => {
-    console.log('=== IMAGE LOAD EVENT ===');
-    console.log('Image element:', imageRef.current);
-    console.log('Natural dimensions:', imageRef.current?.naturalWidth, 'x', imageRef.current?.naturalHeight);
-    console.log('Display dimensions:', imageRef.current?.clientWidth, 'x', imageRef.current?.clientHeight);
-    
-    // Just set image ready - let the image display naturally
-    setImageReady(true);
-  };
+  const [items] = useState(analysisData.items || []);
+  const [totalValue] = useState(analysisData.totalValue || 0);
   
   return (
     <div className="inventory-results">
@@ -657,53 +213,17 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         </div>
       </div>
       
-      <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Prepare Listings</h3>
+      <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Your Sellable Items</h3>
       
-      <div 
-        className="image-with-boxes" 
-        id="imageWithBoxes" 
-        style={{ 
-          maxWidth: 600,  // Reduced from 800 for better viewing
-          margin: '0 auto', 
-          position: 'relative',
-          backgroundColor: '#f5f5f5'
-        }}
-      >
-        <img
-          ref={imageRef}
-          id="analyzedImage"
-          alt="Analyzed room"
-          style={{ 
-            width: '100%', 
-            height: 'auto', 
-            display: 'block'
-          }}
-          onLoad={handleImageLoad}
-        />
-      </div>
-      
-      <div className="items-container">
-        {items.map((item, index) => !item.removed && (
-          <div key={index} className="item-row" id={`item-row-${index}`}>
-            <ItemCard
-              item={item}
-              index={index}
-              onHighlight={highlightBox}
-              onRemove={removeItem}
-            />
-            <ItemEditor
-              item={item}
-              index={index}
-              onList={listItem}
-              showProcessAll={index === 0}
-            />
-          </div>
+      <div className="items-grid">
+        {items.map((item, index) => (
+          <ItemCard key={index} item={item} index={index} />
         ))}
       </div>
       
       {analysisData.insights?.quickWins && (
         <div style={{ marginTop: 24, padding: 16, backgroundColor: '#E8F5E9', borderRadius: 8, maxWidth: 800, margin: '24px auto' }}>
-          <h4 style={{ color: '#2E7D32', marginBottom: 8 }}>💡 Quick Wins:</h4>
+          <h4 style={{ color: '#2E7D32', marginBottom: 8 }}>💡 Results:</h4>
           <ul style={{ color: '#2E7D32', marginLeft: 20, lineHeight: 1.6 }}>
             {analysisData.insights.quickWins.map((tip, i) => (
               <li key={i}>{tip}</li>
@@ -711,20 +231,109 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
           </ul>
         </div>
       )}
-      
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
   );
 };
+
+// New function to process items locally with background removal
+async function processItemsLocally(items, imageFile, onProgress) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  
+  return new Promise((resolve) => {
+    img.onload = async () => {
+      const processedItems = [];
+      
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        onProgress(i + 1, items.length, item.name);
+        
+        try {
+          // Calculate crop dimensions with padding
+          const padding = 0.4;
+          let x = (item.boundingBox.x / 100) * img.width;
+          let y = (item.boundingBox.y / 100) * img.height;
+          let width = (item.boundingBox.width / 100) * img.width;
+          let height = (item.boundingBox.height / 100) * img.height;
+          
+          // Add padding
+          const padX = width * padding;
+          const padY = height * padding;
+          x = Math.max(0, x - padX);
+          y = Math.max(0, y - padY);
+          width = Math.min(width + (padX * 2), img.width - x);
+          height = Math.min(height + (padY * 2), img.height - y);
+          
+          // Crop the image
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+          
+          const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+          
+          // Remove background using client-side library
+          let removedBgBlob;
+          try {
+            removedBgBlob = await removeBackground(croppedBlob);
+          } catch (bgError) {
+            console.error('Background removal failed, using original:', bgError);
+            removedBgBlob = croppedBlob;
+          }
+          
+          // Create final image with white background
+          const finalCanvas = document.createElement('canvas');
+          const finalCtx = finalCanvas.getContext('2d');
+          finalCanvas.width = width;
+          finalCanvas.height = height;
+          
+          // White background
+          finalCtx.fillStyle = 'white';
+          finalCtx.fillRect(0, 0, width, height);
+          
+          // Draw transparent image on white background
+          const transparentImg = new Image();
+          await new Promise((imgResolve) => {
+            transparentImg.onload = () => {
+              finalCtx.drawImage(transparentImg, 0, 0);
+              imgResolve();
+            };
+            transparentImg.src = URL.createObjectURL(removedBgBlob);
+          });
+          
+          const finalImage = finalCanvas.toDataURL('image/jpeg', 0.9);
+          
+          processedItems.push({
+            ...item,
+            processedImage: finalImage,
+            processed: true
+          });
+          
+        } catch (error) {
+          console.error(`Failed to process ${item.name}:`, error);
+          processedItems.push({
+            ...item,
+            processed: false,
+            error: error.message
+          });
+        }
+      }
+      
+      resolve(processedItems);
+    };
+    
+    img.src = URL.createObjectURL(imageFile);
+  });
+}
 
 // Main App Component
 export default function App() {
   const [hasApiKey, setHasApiKey] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [, setSelectedImage] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [analysisData, setAnalysisData] = useState(null);
+  const [processingStatus, setProcessingStatus] = useState(null);
   const fileInputRef = useRef(null);
   
   useEffect(() => {
@@ -756,13 +365,9 @@ export default function App() {
         const base64 = e.target.result.split(',')[1];
         
         try {
-          const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze' : '/api/analyze');
+          // Step 1: Get AI detection
+          const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
           console.log('Sending request to:', endpoint);
-          console.log('Request payload size:', JSON.stringify({
-            image: base64.substring(0, 50) + '...',
-            apiKey: 'sk-ant-...',
-            roomType: 'unknown'
-          }).length);
           
           const response = await fetch(endpoint, {
             method: 'POST',
@@ -774,31 +379,44 @@ export default function App() {
             })
           });
           
-          console.log('Response status:', response.status);
-          console.log('Response headers:', response.headers);
-          
           if (!response.ok) {
             const errorText = await response.text();
-            console.error('Server error response:', errorText);
             throw new Error(`Server error: ${response.status} - ${errorText}`);
           }
           
           const data = await response.json();
           
           if (data.success) {
-            setAnalysisData({ ...data, imageFile });
+            // Step 2: Process backgrounds locally
+            console.log('Processing backgrounds locally...');
+            setProcessingStatus({ current: 0, total: data.items.length });
+            
+            const processedItems = await processItemsLocally(
+              data.items, 
+              imageFile,
+              (current, total, itemName) => {
+                setProcessingStatus({ current, total, currentItem: itemName });
+              }
+            );
+            
+            setProcessingStatus(null);
+            
+            const analysisData = {
+              ...data,
+              items: processedItems,
+              imageFile
+            };
+            
             setMessages(prev => [...prev, { 
               role: 'assistant', 
-              component: <ImageAnalysis analysisData={data} imageFile={imageFile} />
+              component: <ImageAnalysis analysisData={analysisData} imageFile={imageFile} />
             }]);
           } else {
-            setMessages(prev => [...prev, { 
-              role: 'assistant', 
-              text: `Error: ${data.error || 'Analysis failed'}` 
-            }]);
+            throw new Error(data.error || 'Analysis failed');
           }
         } catch (error) {
           console.error('Full error details:', error);
+          setProcessingStatus(null);
           setMessages(prev => [...prev, { 
             role: 'assistant', 
             text: `Error: ${error.message}. Please check the console for more details.` 
@@ -868,7 +486,7 @@ export default function App() {
               </div>
             ))}
             
-            {isLoading && (
+            {isLoading && !processingStatus && (
               <div className="message">
                 <div className="message-avatar assistant-avatar">P</div>
                 <div className="message-content">
@@ -890,7 +508,7 @@ export default function App() {
             </button>
             <textarea
               className="input-box"
-              placeholder="Upload a room photo or type a message..."
+              placeholder="Upload a room photo to discover sellable items..."
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
@@ -915,6 +533,11 @@ export default function App() {
           />
         </div>
       </div>
+      
+      {processingStatus && (
+        <ProcessingStatus {...processingStatus} />
+      )}
+      
       <SpeedInsights />
     </div>
   );
