@@ -47,7 +47,7 @@ module.exports = async function handler(req, res) {
     }
 
     console.log('Starting room analysis...');
-    console.log(`Room type: ${roomType || 'unknown'}`);
+    console.log('Room type:', roomType || 'unknown');
     console.log('API Key present:', !!apiKey);
     console.log('API Key length:', apiKey.length);
     console.log('Image is base64:', typeof image === 'string');
@@ -91,7 +91,7 @@ module.exports = async function handler(req, res) {
                 "confidence": 85
               }
             ]`
-          },,
+          },
           {
             type: "image",
             source: {
@@ -101,7 +101,7 @@ module.exports = async function handler(req, res) {
             }
           }
         ]
-      ]
+      }]
     });
 
     console.log('AI Response received');
@@ -134,7 +134,7 @@ module.exports = async function handler(req, res) {
       confidence: item.confidence || 75
     }));
 
-    console.log(`Found ${items.length} items`);
+    console.log('Found', items.length, 'items');
     
     // Calculate total value
     const totalValue = items.reduce((sum, item) => {
@@ -142,7 +142,7 @@ module.exports = async function handler(req, res) {
       return sum + value;
     }, 0);
 
-    console.log(`Total value: $${totalValue}`);
+    console.log('Total value: $', totalValue);
     
     res.status(200).json({
       success: true,
