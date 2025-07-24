@@ -469,6 +469,11 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         let width = (item.boundingBox.width / 100) * displayWidth;
         let height = (item.boundingBox.height / 100) * displayHeight;
         
+        // IMPORTANT: If the API returns center-based coordinates, convert to top-left
+        // Uncomment these lines if boxes appear shifted:
+        // x = x - (width / 2);
+        // y = y - (height / 2);
+        
         console.log(`Percentage coords: x=${item.boundingBox.x}%, y=${item.boundingBox.y}%, w=${item.boundingBox.width}%, h=${item.boundingBox.height}%`);
         console.log(`Pixels before padding: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${width.toFixed(1)}, h=${height.toFixed(1)}`);
         
@@ -658,7 +663,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         className="image-with-boxes" 
         id="imageWithBoxes" 
         style={{ 
-          maxWidth: 800, 
+          maxWidth: 600,  // Reduced from 800 for better viewing
           margin: '0 auto', 
           position: 'relative',
           backgroundColor: '#f5f5f5'
