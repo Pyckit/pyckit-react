@@ -28,12 +28,23 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { image, apiKey, roomType } = req.body;
+    const { image, roomType } = req.body;
     
-    if (!image || !apiKey) {
+    // Use environment variable instead of client-sent API key
+    const apiKey = process.env.ClaudeKey;
+    
+    if (!image) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Missing required fields' 
+        error: 'Missing image' 
+      });
+    }
+    
+    if (!apiKey) {
+      console.error('ClaudeKey environment variable not set');
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Server configuration error - API key not found' 
       });
     }
 
