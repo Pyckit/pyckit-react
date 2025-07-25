@@ -386,14 +386,24 @@ const EditModal = ({ item, onSave, onClose, onList }) => {
             onClick={handleSave}
             style={{
               flex: 1,
-              padding: 16,
-              background: '#C49D50', // Darker shade
-              color: 'white',
-              border: 'none',
+              padding: '14px 24px',
+              background: 'white',
+              color: '#333',
+              border: '2px solid #e0e0e0',
               borderRadius: 8,
-              fontSize: 18,
-              fontWeight: '500',
-              cursor: 'pointer'
+              fontSize: 16,
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.borderColor = '#333';
+              e.target.style.background = '#fafafa';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.borderColor = '#e0e0e0';
+              e.target.style.background = 'white';
             }}
           >
             Save
@@ -402,14 +412,24 @@ const EditModal = ({ item, onSave, onClose, onList }) => {
             onClick={handleList}
             style={{
               flex: 1,
-              padding: 16,
-              background: 'var(--primary-color)',
+              padding: '14px 24px',
+              background: '#333',
               color: 'white',
-              border: 'none',
+              border: '2px solid #333',
               borderRadius: 8,
-              fontSize: 18,
-              fontWeight: '500',
-              cursor: 'pointer'
+              fontSize: 16,
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = '#000';
+              e.target.style.borderColor = '#000';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = '#333';
+              e.target.style.borderColor = '#333';
             }}
           >
             List Item
