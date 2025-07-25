@@ -251,7 +251,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
         
         try {
           // Calculate crop dimensions with MORE padding
-          const padding = 0.6;  // 60% padding for better background removal
+          const padding = 0.8;  // 80% padding for better background removal
           let x = (item.boundingBox.x / 100) * img.width;
           let y = (item.boundingBox.y / 100) * img.height;
           let width = (item.boundingBox.width / 100) * img.width;
@@ -291,10 +291,14 @@ async function processItemsLocally(items, imageFile, onProgress) {
           finalCtx.fillStyle = '#f5f5f5';
           finalCtx.fillRect(0, 0, width, height);
           
-          // Optional: Add subtle gradient for more professional look
+          // DARK BACKGROUND FOR TESTING - helps verify cropping/padding
+          finalCtx.fillStyle = '#2a2a2a'; // Dark gray
+          finalCtx.fillRect(0, 0, width, height);
+
+          // Optional: Add subtle gradient for testing visibility
           const gradient = finalCtx.createLinearGradient(0, 0, width, height);
-          gradient.addColorStop(0, '#f8f8f8');
-          gradient.addColorStop(1, '#eeeeee');
+          gradient.addColorStop(0, '#333333');
+          gradient.addColorStop(1, '#1a1a1a');
           finalCtx.fillStyle = gradient;
           finalCtx.fillRect(0, 0, width, height);
           
