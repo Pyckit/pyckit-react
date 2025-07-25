@@ -256,7 +256,7 @@ const EditModal = ({ item, onSave, onClose, onList }) => {
   
   const handleList = () => {
     const updatedItem = { ...item, name: title, value: price, condition, description };
-    onSave(updatedItem);
+    onSave(updatedItem, false); // false = don't show save notification
     onList(updatedItem);
   };
   
@@ -429,7 +429,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     setEditingItem({ ...items[index], index });
   };
   
-  const handleSave = (updatedItem) => {
+  const handleSave = (updatedItem, showNotification = true) => {
     const newItems = [...items];
     newItems[updatedItem.index] = updatedItem;
     setItems(newItems);
@@ -439,7 +439,9 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     setTotalValue(newTotal);
     
     setEditingItem(null);
-    alert('Changes saved! You can list this item later.');
+    if (showNotification) {
+      alert('Changes saved! You can list this item later.');
+    }
   };
   
   const handleListFromModal = (item) => {
