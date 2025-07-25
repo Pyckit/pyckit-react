@@ -211,7 +211,7 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => (
       <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
       <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
     </div>
-    <span className="confidence-badge" style={{ marginBottom: 16 }}>{item.confidence}% match</span>
+    <span className="confidence-badge">{item.confidence}% match</span>
     
     <div 
       style={{ 
