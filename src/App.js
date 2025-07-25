@@ -201,34 +201,64 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => (
     </div>
     <span className="confidence-badge">{item.confidence}% match</span>
     
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onEdit(index);
-      }}
-      style={{
-        width: '100%',
-        padding: '12px',
-        marginTop: 16,
-        background: 'var(--primary-color)',
-        color: 'white',
-        border: 'none',
-        borderRadius: 8,
-        fontSize: 16,
-        fontWeight: '500',
-        cursor: 'pointer'
-      }}
-    >
-      List Item
-    </button>
+    <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit(index);
+        }}
+        style={{
+          flex: 1,
+          padding: '12px',
+          background: '#C49D50', // Darker shade of primary color
+          color: 'white',
+          border: 'none',
+          borderRadius: 8,
+          fontSize: 16,
+          fontWeight: '500',
+          cursor: 'pointer'
+        }}
+      >
+        Edit
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          alert(`Listed: ${item.name} for ${item.value}`);
+        }}
+        style={{
+          flex: 1,
+          padding: '12px',
+          background: 'var(--primary-color)',
+          color: 'white',
+          border: 'none',
+          borderRadius: 8,
+          fontSize: 16,
+          fontWeight: '500',
+          cursor: 'pointer'
+        }}
+      >
+        List Item
+      </button>
+    </div>
   </div>
 );
 
-const EditModal = ({ item, onSave, onClose }) => {
+const EditModal = ({ item, onSave, onClose, onList }) => {
   const [title, setTitle] = useState(item.name);
   const [price, setPrice] = useState(item.value);
   const [condition, setCondition] = useState(item.condition);
   const [description, setDescription] = useState(item.description || '');
+  
+  const handleSave = () => {
+    onSave({ ...item, name: title, value: price, condition, description });
+  };
+  
+  const handleList = () => {
+    const updatedItem = { ...item, name: title, value: price, condition, description };
+    onSave(updatedItem);
+    onList(updatedItem);
+  };
   
   return (
     <div style={{
@@ -351,22 +381,40 @@ const EditModal = ({ item, onSave, onClose }) => {
           />
         </div>
         
-        <button
-          onClick={() => onSave({ ...item, name: title, value: price, condition, description })}
-          style={{
-            width: '100%',
-            padding: 16,
-            background: 'var(--primary-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 18,
-            fontWeight: '500',
-            cursor: 'pointer'
-          }}
-        >
-          List Item
-        </button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button
+            onClick={handleSave}
+            style={{
+              flex: 1,
+              padding: 16,
+              background: '#C49D50', // Darker shade
+              color: 'white',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 18,
+              fontWeight: '500',
+              cursor: 'pointer'
+            }}
+          >
+            Save
+          </button>
+          <button
+            onClick={handleList}
+            style={{
+              flex: 1,
+              padding: 16,
+              background: 'var(--primary-color)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 18,
+              fontWeight: '500',
+              cursor: 'pointer'
+            }}
+          >
+            List Item
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -391,7 +439,11 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
     setTotalValue(newTotal);
     
     setEditingItem(null);
-    alert('Item ready to list! (In production, this would create a marketplace listing)');
+    alert('Changes saved! You can list this item later.');
+  };
+  
+  const handleListFromModal = (item) => {
+    alert(`Listed: ${item.name} for ${item.value}`);
   };
   
   const handleRemove = (index) => {
@@ -454,6 +506,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         <EditModal
           item={editingItem}
           onSave={handleSave}
+          onList={handleListFromModal}
           onClose={() => setEditingItem(null)}
         />
       )}
