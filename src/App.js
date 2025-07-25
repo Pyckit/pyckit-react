@@ -157,92 +157,110 @@ const ProcessingStatus = ({ current, total, currentItem }) => (
   </div>
 );
 
-const ItemCard = ({ item, index, onEdit, onRemove }) => (
-  <div className="item-card">
-    <button 
-      className="remove-btn"
-      onClick={(e) => {
-        e.stopPropagation();
-        onRemove(index);
-      }}
-      style={{
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        background: '#ff4444',
-        color: 'white',
-        border: 'none',
-        borderRadius: '50%',
-        width: 30,
-        height: 30,
-        cursor: 'pointer',
-        fontSize: 18,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1
-      }}
+const ItemCard = ({ item, index, onEdit, onRemove }) => {
+  const handleCardClick = (e) => {
+    // Check if we clicked on a button or inside a button
+    const clickedButton = e.target.closest('button');
+    if (!clickedButton) {
+      onEdit(index);
+    }
+  };
+
+  return (
+    <div 
+      className="item-card" 
+      onClick={handleCardClick}
+      style={{ position: 'relative', cursor: 'pointer' }}
     >
-      ×
-    </button>
-    
-    <img 
-      className="item-thumbnail-large" 
-      src={item.processedImage || item.stagedImage || '#'}
-      alt={item.name}
-      style={{ backgroundColor: item.processedImage ? 'white' : '#f0f0f0' }}
-    />
-    <div className="item-name">{item.name}</div>
-    <div className="item-value">${item.value}</div>
-    <div className="item-details">
-      <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
-      <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
-    </div>
-    <span className="confidence-badge">{item.confidence}% match</span>
-    
-    <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-      <button
+      <button 
+        className="remove-btn"
         onClick={(e) => {
           e.stopPropagation();
-          onEdit(index);
+          onRemove(index);
         }}
         style={{
-          flex: 1,
-          padding: '12px',
-          background: '#C49D50', // Darker shade of primary color
+          position: 'absolute',
+          top: 10,
+          right: 10,
+          background: '#ff4444',
           color: 'white',
           border: 'none',
-          borderRadius: 8,
-          fontSize: 16,
-          fontWeight: '500',
-          cursor: 'pointer'
+          borderRadius: '50%',
+          width: 30,
+          height: 30,
+          cursor: 'pointer',
+          fontSize: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1
         }}
       >
-        Edit
+        ×
       </button>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          alert(`Listed: ${item.name} for ${item.value}`);
+      
+      <img 
+        className="item-thumbnail-large" 
+        src={item.processedImage || item.stagedImage || '#'}
+        alt={item.name}
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = '#';
         }}
-        style={{
-          flex: 1,
-          padding: '12px',
-          background: 'var(--primary-color)',
-          color: 'white',
-          border: 'none',
-          borderRadius: 8,
-          fontSize: 16,
-          fontWeight: '500',
-          cursor: 'pointer'
-        }}
-      >
-        List Item
-      </button>
+      />
+      
+      <div className="item-name">{item.name}</div>
+      <div className="item-value">${item.value}</div>
+      <div className="item-details">
+        <p><strong>Condition:</strong> {item.condition}</p>
+        <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
+        <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
+      </div>
+      <span className="confidence-badge">{item.confidence}% match</span>
+      
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(index);
+          }}
+          style={{
+            flex: 1,
+            padding: '12px',
+            background: '#C49D50',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 16,
+            fontWeight: '500',
+            cursor: 'pointer'
+          }}
+        >
+          Edit
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            alert(`Listed: ${item.name} for ${item.value}`);
+          }}
+          style={{
+            flex: 1,
+            padding: '12px',
+            background: 'var(--primary-color)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 16,
+            fontWeight: '500',
+            cursor: 'pointer'
+          }}
+        >
+          List Item
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const EditModal = ({ item, onSave, onClose, onList }) => {
   const [title, setTitle] = useState(item.name);
