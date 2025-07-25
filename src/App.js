@@ -157,110 +157,130 @@ const ProcessingStatus = ({ current, total, currentItem }) => (
   </div>
 );
 
-const ItemCard = ({ item, index, onEdit, onRemove }) => {
-  const handleCardClick = (e) => {
-    // Check if we clicked on a button or inside a button
-    const clickedButton = e.target.closest('button');
-    if (!clickedButton) {
+const ItemCard = ({ item, index, onEdit, onRemove }) => (
+  <div 
+    className="item-card" 
+    onClick={() => {
+      console.log('Card clicked - opening edit modal for index:', index);
       onEdit(index);
-    }
-  };
-
-  return (
-    <div 
-      className="item-card" 
-      onClick={handleCardClick}
-      style={{ position: 'relative', cursor: 'pointer' }}
+    }}
+    style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      cursor: 'pointer',
+      position: 'relative',
+      minHeight: '520px'
+    }}
+  >
+    <button 
+      className="remove-btn"
+      onClick={(e) => {
+        e.stopPropagation();
+        onRemove(index);
+      }}
+      style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        background: '#ff4444',
+        color: 'white',
+        border: 'none',
+        borderRadius: '50%',
+        width: 30,
+        height: 30,
+        cursor: 'pointer',
+        fontSize: 18,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1
+      }}
     >
-      <button 
-        className="remove-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove(index);
-        }}
+      ×
+    </button>
+    
+    <img 
+      className="item-thumbnail-large" 
+      src={item.processedImage || item.stagedImage || '#'}
+      alt={item.name}
+      style={{ backgroundColor: item.processedImage ? 'white' : '#f0f0f0' }}
+    />
+    <div className="item-name">{item.name}</div>
+    <div className="item-value">${item.value}</div>
+    <div className="item-details" style={{ flexGrow: 1 }}>
+      <p><strong>Condition:</strong> {item.condition}</p>
+      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
+      <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
+    </div>
+    <span className="confidence-badge" style={{ marginBottom: 16 }}>{item.confidence}% match</span>
+    
+    <div 
+      style={{ 
+        display: 'flex', 
+        gap: 8, 
+        marginTop: 'auto',
+        paddingTop: 12
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => onEdit(index)}
         style={{
-          position: 'absolute',
-          top: 10,
-          right: 10,
-          background: '#ff4444',
-          color: 'white',
-          border: 'none',
-          borderRadius: '50%',
-          width: 30,
-          height: 30,
+          flex: 1,
+          padding: '8px 16px',
+          background: 'transparent',
+          color: '#666',
+          border: '1px solid #ddd',
+          borderRadius: 6,
+          fontSize: 14,
+          fontWeight: '500',
           cursor: 'pointer',
-          fontSize: 18,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1
+          transition: 'all 0.2s ease',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.borderColor = '#999';
+          e.target.style.color = '#333';
+          e.target.style.background = '#f8f8f8';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.borderColor = '#ddd';
+          e.target.style.color = '#666';
+          e.target.style.background = 'transparent';
         }}
       >
-        ×
+        Edit
       </button>
-      
-      <img 
-        className="item-thumbnail-large" 
-        src={item.processedImage || item.stagedImage || '#'}
-        alt={item.name}
-        onError={(e) => {
-          e.target.onerror = null;
-          e.target.src = '#';
+      <button
+        onClick={() => alert(`Listed: ${item.name} for $${item.value}`)}
+        style={{
+          flex: 1,
+          padding: '8px 16px',
+          background: '#000',
+          color: 'white',
+          border: '1px solid #000',
+          borderRadius: 6,
+          fontSize: 14,
+          fontWeight: '500',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
         }}
-      />
-      
-      <div className="item-name">{item.name}</div>
-      <div className="item-value">${item.value}</div>
-      <div className="item-details">
-        <p><strong>Condition:</strong> {item.condition}</p>
-        <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
-        <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
-      </div>
-      <span className="confidence-badge">{item.confidence}% match</span>
-      
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(index);
-          }}
-          style={{
-            flex: 1,
-            padding: '12px',
-            background: '#C49D50',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 16,
-            fontWeight: '500',
-            cursor: 'pointer'
-          }}
-        >
-          Edit
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            alert(`Listed: ${item.name} for ${item.value}`);
-          }}
-          style={{
-            flex: 1,
-            padding: '12px',
-            background: 'var(--primary-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 16,
-            fontWeight: '500',
-            cursor: 'pointer'
-          }}
-        >
-          List Item
-        </button>
-      </div>
+        onMouseEnter={(e) => {
+          e.target.style.background = '#333';
+          e.target.style.borderColor = '#333';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.background = '#000';
+          e.target.style.borderColor = '#000';
+        }}
+      >
+        List Item
+      </button>
     </div>
-  );
-};
+  </div>
+);
 
 const EditModal = ({ item, onSave, onClose, onList }) => {
   const [title, setTitle] = useState(item.name);
