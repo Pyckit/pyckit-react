@@ -47,11 +47,12 @@ const WelcomeScreen = ({ onFileSelect }) => {
         <h3 style={{ color: '#92400E', marginBottom: 8 }}>💡 How it works:</h3>
         <ol style={{ color: '#92400E', marginLeft: 20, lineHeight: 1.8 }}>
           <li>Take a clear photo of any room in your house</li>
-          <li>Pyckit AI identifies all sellable items automatically</li>
+          <li>Our AI identifies all sellable items automatically</li>
           <li>Background removal happens instantly in your browser (FREE!)</li>
-          <li>Get local market prices and descriptions</li>
+          <li>Get Calgary market prices and descriptions</li>
         </ol>
       </div>
+      
       <input
         ref={fileInputRef}
         type="file"
@@ -503,7 +504,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   };
   
   const handleListFromModal = (item) => {
-    alert(`Listed: ${item.name} for ${item.value}`);
+    alert(`Listed: ${item.name} for $${item.value}`);
   };
   
   const handleRemove = (index) => {
@@ -773,9 +774,18 @@ export default function App() {
         } catch (error) {
           console.error('Full error details:', error);
           setProcessingStatus(null);
+          
+          // Better error handling for common issues
+          let errorMessage = error.message;
+          if (error.message.includes('overloaded_error') || error.message.includes('529')) {
+            errorMessage = 'The AI service is currently overloaded. Please try again in a few moments.';
+          } else if (error.message.includes('401')) {
+            errorMessage = 'Authentication failed. Please check your API key.';
+          }
+          
           setMessages(prev => [...prev, { 
             role: 'assistant', 
-            text: `Error: ${error.message}. Please check the console for more details.` 
+            text: `Error: ${errorMessage}` 
           }]);
         }
         
