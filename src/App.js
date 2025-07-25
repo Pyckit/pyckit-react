@@ -157,8 +157,35 @@ const ProcessingStatus = ({ current, total, currentItem }) => (
   </div>
 );
 
-const ItemCard = ({ item, index }) => (
+const ItemCard = ({ item, index, onEdit, onRemove }) => (
   <div className="item-card">
+    <button 
+      className="remove-btn"
+      onClick={(e) => {
+        e.stopPropagation();
+        onRemove(index);
+      }}
+      style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        background: '#ff4444',
+        color: 'white',
+        border: 'none',
+        borderRadius: '50%',
+        width: 30,
+        height: 30,
+        cursor: 'pointer',
+        fontSize: 18,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1
+      }}
+    >
+      ×
+    </button>
+    
     <img 
       className="item-thumbnail-large" 
       src={item.processedImage || item.stagedImage || '#'}
@@ -170,39 +197,217 @@ const ItemCard = ({ item, index }) => (
     <div className="item-details">
       <p><strong>Condition:</strong> {item.condition}</p>
       <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
+      <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
     </div>
     <span className="confidence-badge">{item.confidence}% match</span>
     
-    {item.processed && (
-      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            const link = document.createElement('a');
-            link.download = `${item.name.replace(/\s+/g, '_')}_listing.jpg`;
-            link.href = item.processedImage;
-            link.click();
-          }}
-          style={{
-            padding: '6px 12px',
-            fontSize: 12,
-            background: 'var(--primary-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer'
-          }}
-        >
-          💾 Download
-        </button>
-      </div>
-    )}
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onEdit(index);
+      }}
+      style={{
+        width: '100%',
+        padding: '12px',
+        marginTop: 16,
+        background: 'var(--primary-color)',
+        color: 'white',
+        border: 'none',
+        borderRadius: 8,
+        fontSize: 16,
+        fontWeight: '500',
+        cursor: 'pointer'
+      }}
+    >
+      List Item
+    </button>
   </div>
 );
 
+const EditModal = ({ item, onSave, onClose }) => {
+  const [title, setTitle] = useState(item.name);
+  const [price, setPrice] = useState(item.value);
+  const [condition, setCondition] = useState(item.condition);
+  const [description, setDescription] = useState(item.description || '');
+  
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        background: 'white',
+        borderRadius: 12,
+        padding: 32,
+        maxWidth: 600,
+        width: '90%',
+        maxHeight: '90vh',
+        overflow: 'auto'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h2 style={{ margin: 0 }}>Edit Listing #{item.index + 1}</h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: '#ff4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '50%',
+              width: 32,
+              height: 32,
+              cursor: 'pointer',
+              fontSize: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            ×
+          </button>
+        </div>
+        
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
+            TITLE
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            style={{
+              width: '100%',
+              padding: 12,
+              border: '1px solid #ddd',
+              borderRadius: 8,
+              fontSize: 16
+            }}
+          />
+        </div>
+        
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
+            PRICE
+          </label>
+          <input
+            type="number"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            style={{
+              width: '100%',
+              padding: 12,
+              border: '1px solid #ddd',
+              borderRadius: 8,
+              fontSize: 16
+            }}
+          />
+        </div>
+        
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
+            CONDITION
+          </label>
+          <select
+            value={condition}
+            onChange={(e) => setCondition(e.target.value)}
+            style={{
+              width: '100%',
+              padding: 12,
+              border: '1px solid #ddd',
+              borderRadius: 8,
+              fontSize: 16
+            }}
+          >
+            <option value="Excellent">Excellent</option>
+            <option value="Very Good">Very Good</option>
+            <option value="Good">Good</option>
+            <option value="Fair">Fair</option>
+          </select>
+        </div>
+        
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
+            DESCRIPTION
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            style={{
+              width: '100%',
+              padding: 12,
+              border: '1px solid #ddd',
+              borderRadius: 8,
+              fontSize: 16,
+              resize: 'vertical'
+            }}
+          />
+        </div>
+        
+        <button
+          onClick={() => onSave({ ...item, name: title, value: price, condition, description })}
+          style={{
+            width: '100%',
+            padding: 16,
+            background: 'var(--primary-color)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 18,
+            fontWeight: '500',
+            cursor: 'pointer'
+          }}
+        >
+          List Item
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ImageAnalysis = ({ analysisData, imageFile }) => {
-  const [items] = useState(analysisData.items || []);
-  const [totalValue] = useState(analysisData.totalValue || 0);
+  const [items, setItems] = useState(analysisData.items || []);
+  const [totalValue, setTotalValue] = useState(analysisData.totalValue || 0);
+  const [editingItem, setEditingItem] = useState(null);
+  
+  const handleEdit = (index) => {
+    setEditingItem({ ...items[index], index });
+  };
+  
+  const handleSave = (updatedItem) => {
+    const newItems = [...items];
+    newItems[updatedItem.index] = updatedItem;
+    setItems(newItems);
+    
+    // Recalculate total
+    const newTotal = newItems.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
+    setTotalValue(newTotal);
+    
+    setEditingItem(null);
+    alert('Item ready to list! (In production, this would create a marketplace listing)');
+  };
+  
+  const handleRemove = (index) => {
+    if (window.confirm('Remove this item from the list?')) {
+      const newItems = items.filter((_, i) => i !== index);
+      setItems(newItems);
+      
+      // Recalculate total
+      const newTotal = newItems.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
+      setTotalValue(newTotal);
+    }
+  };
+  
+  const handleListAll = () => {
+    alert(`Ready to list all ${items.length} items! Total value: $${totalValue}`);
+  };
   
   return (
     <div className="inventory-results">
@@ -213,13 +418,45 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         </div>
       </div>
       
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <button
+          onClick={handleListAll}
+          style={{
+            padding: '16px 48px',
+            background: 'var(--primary-color)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 18,
+            fontWeight: '600',
+            cursor: 'pointer'
+          }}
+        >
+          List All Items ({items.length})
+        </button>
+      </div>
+      
       <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Your Sellable Items</h3>
       
       <div className="items-grid">
         {items.map((item, index) => (
-          <ItemCard key={index} item={item} index={index} />
+          <ItemCard 
+            key={index} 
+            item={item} 
+            index={index} 
+            onEdit={handleEdit}
+            onRemove={handleRemove}
+          />
         ))}
       </div>
+      
+      {editingItem && (
+        <EditModal
+          item={editingItem}
+          onSave={handleSave}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
       
       {analysisData.insights?.quickWins && (
         <div style={{ marginTop: 24, padding: 16, backgroundColor: '#E8F5E9', borderRadius: 8, maxWidth: 800, margin: '24px auto' }}>
@@ -251,7 +488,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
         
         try {
           // Calculate crop dimensions with MORE padding
-          const padding = 0.8;  // 80% padding for better background removal
+          const padding = 0.8;  // 80% padding for TESTING - see if we need more
           let x = (item.boundingBox.x / 100) * img.width;
           let y = (item.boundingBox.y / 100) * img.height;
           let width = (item.boundingBox.width / 100) * img.width;
@@ -281,20 +518,16 @@ async function processItemsLocally(items, imageFile, onProgress) {
             removedBgBlob = croppedBlob;
           }
           
-          // Create final image with LIGHT GRAY background
+          // Create final image with DARK BACKGROUND FOR TESTING
           const finalCanvas = document.createElement('canvas');
           const finalCtx = finalCanvas.getContext('2d');
           finalCanvas.width = width;
           finalCanvas.height = height;
           
-          // Light gray background (better for white items)
-          finalCtx.fillStyle = '#f5f5f5';
-          finalCtx.fillRect(0, 0, width, height);
-          
           // DARK BACKGROUND FOR TESTING - helps verify cropping/padding
           finalCtx.fillStyle = '#2a2a2a'; // Dark gray
           finalCtx.fillRect(0, 0, width, height);
-
+          
           // Optional: Add subtle gradient for testing visibility
           const gradient = finalCtx.createLinearGradient(0, 0, width, height);
           gradient.addColorStop(0, '#333333');
@@ -302,7 +535,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
           finalCtx.fillStyle = gradient;
           finalCtx.fillRect(0, 0, width, height);
           
-          // Draw transparent image on gray background
+          // Draw transparent image on dark background
           const transparentImg = new Image();
           await new Promise((imgResolve) => {
             transparentImg.onload = () => {
