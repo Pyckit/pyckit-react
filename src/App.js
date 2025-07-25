@@ -47,13 +47,11 @@ const WelcomeScreen = ({ onFileSelect }) => {
         <h3 style={{ color: '#92400E', marginBottom: 8 }}>💡 How it works:</h3>
         <ol style={{ color: '#92400E', marginLeft: 20, lineHeight: 1.8 }}>
           <li>Take a clear photo of any room in your house</li>
-          <li>Our AI identifies all sellable items automatically</li>
+          <li>Pyckit AI identifies all sellable items automatically</li>
           <li>Background removal happens instantly in your browser (FREE!)</li>
-          <li>Get Calgary market prices and descriptions</li>
-          <li>Download professional product photos ready for listing</li>
+          <li>Get local market prices and descriptions</li>
         </ol>
       </div>
-      
       <input
         ref={fileInputRef}
         type="file"
