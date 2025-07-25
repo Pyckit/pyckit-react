@@ -64,22 +64,27 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    // Same prompt structure as Claude
+    // Updated prompt with clearer bounding box instructions
     const prompt = `Analyze this room photo and identify ALL sellable items you can see. For each item, provide:
     1. Name: Be specific with brand/model if visible (e.g., "IKEA Malm 6-Drawer Dresser" not just "dresser")
     2. Value: Estimated resale value in CAD for Calgary market (be realistic for used items)
     3. Condition: Excellent/Very Good/Good/Fair based on what you can see
-    4. BoundingBox: The location as percentages where x,y is the CENTER of the object: {"x": %, "y": %, "width": %, "height": %}
+    4. BoundingBox: IMPORTANT - The location as percentages where x,y is the CENTER of the object (not top-left corner): 
+       - x: horizontal center of object as percentage (0-100)
+       - y: vertical center of object as percentage (0-100)
+       - width: width of object as percentage of image width (0-100)
+       - height: height of object as percentage of image height (0-100)
+       Example: {"x": 50, "y": 50, "width": 30, "height": 40} means object centered at middle of image, 30% wide, 40% tall
     5. Description: Brief description of the item (1-2 sentences)
     6. Confidence: Your confidence score 0-100 in the identification
-    
-    Important:
-    - Include ALL items that could be sold: furniture, electronics, decor, appliances, books, etc.
-    - Be generous with bounding boxes (include the whole item plus some space around it)
-    - Price realistically for Calgary's used market (typically 20-40% of retail)
-    - The x,y coordinates should be the CENTER of the object, not top-left corner
-    
-    Return ONLY a JSON array of items. Example:
+
+    CRITICAL: 
+    - All boundingBox values must be percentages between 0 and 100
+    - x,y represent the CENTER point of the object, NOT the top-left corner
+    - Include generous padding around objects (make bounding boxes slightly larger than the object)
+    - Ensure all detected objects are actually sellable items (not walls, floors, or fixed fixtures)
+
+    Return ONLY a JSON array. Example format:
     [
       {
         "name": "IKEA Malm 6-Drawer Dresser",
@@ -111,26 +116,81 @@ module.exports = async function handler(req, res) {
     let items;
     try {
       items = JSON.parse(cleanedResponse);
+      console.log('Parsed items count:', items.length);
+      if (items.length > 0) {
+        console.log('Sample item from Gemini:', JSON.stringify(items[0], null, 2));
+      }
     } catch (parseError) {
       console.error('Failed to parse AI response:', cleanedResponse);
       throw new Error('Invalid response format from AI');
     }
 
-    // Validate and clean up items
-    items = items.map(item => ({
-      name: item.name || 'Unknown Item',
-      value: item.value || '50',
-      condition: item.condition || 'Good',
-      boundingBox: item.boundingBox || { x: 50, y: 50, width: 20, height: 20 },
-      description: item.description || 'Item in good condition',
-      confidence: item.confidence || 75
-    }));
+    // Validate and clean up items with better bounding box handling
+    items = items.map((item, index) => {
+      // Ensure bounding box values are within valid range
+      let bbox = item.boundingBox || { x: 50, y: 50, width: 20, height: 20 };
+      
+      // Log original bbox for debugging
+      if (index === 0) {
+        console.log('Original bbox from Gemini:', bbox);
+      }
+      
+      // Convert if Gemini returns in different format
+      // Some models return x,y as top-left, so we might need to convert
+      if (bbox.x !== undefined && bbox.y !== undefined && bbox.width !== undefined && bbox.height !== undefined) {
+        // Ensure all values are numbers
+        bbox.x = parseFloat(bbox.x);
+        bbox.y = parseFloat(bbox.y);
+        bbox.width = parseFloat(bbox.width);
+        bbox.height = parseFloat(bbox.height);
+        
+        // If values are too large (>100), they might be pixel values instead of percentages
+        if (bbox.x > 100 || bbox.y > 100 || bbox.width > 100 || bbox.height > 100) {
+          console.warn('Bounding box values appear to be pixels, not percentages. Adjusting...');
+          // This is a fallback - in production, you'd want to know the actual image dimensions
+          bbox = { x: 50, y: 50, width: 30, height: 30 };
+        }
+      }
+      
+      // Validate and constrain values to reasonable ranges
+      bbox.x = Math.max(5, Math.min(95, bbox.x || 50));
+      bbox.y = Math.max(5, Math.min(95, bbox.y || 50));
+      bbox.width = Math.max(10, Math.min(90, bbox.width || 30));
+      bbox.height = Math.max(10, Math.min(90, bbox.height || 30));
+      
+      // Ensure the bounding box doesn't extend outside the image
+      if (bbox.x - bbox.width/2 < 0) {
+        bbox.x = bbox.width/2;
+      }
+      if (bbox.x + bbox.width/2 > 100) {
+        bbox.x = 100 - bbox.width/2;
+      }
+      if (bbox.y - bbox.height/2 < 0) {
+        bbox.y = bbox.height/2;
+      }
+      if (bbox.y + bbox.height/2 > 100) {
+        bbox.y = 100 - bbox.height/2;
+      }
+      
+      if (index === 0) {
+        console.log('Adjusted bbox:', bbox);
+      }
+      
+      return {
+        name: item.name || 'Unknown Item',
+        value: String(item.value || '50').replace(/[^0-9.-]+/g, ''),
+        condition: item.condition || 'Good',
+        boundingBox: bbox,
+        description: item.description || 'Item in good condition',
+        confidence: Math.round(item.confidence || 75)
+      };
+    });
 
     console.log('Found', items.length, 'items');
     
     // Calculate total value
     const totalValue = items.reduce((sum, item) => {
-      const value = parseFloat(String(item.value).replace(/[^0-9.-]+/g, '')) || 0;
+      const value = parseFloat(item.value) || 0;
       return sum + value;
     }, 0);
 
@@ -139,10 +199,10 @@ module.exports = async function handler(req, res) {
     res.status(200).json({
       success: true,
       items: items,
-      totalValue,
+      totalValue: Math.round(totalValue),
       insights: {
         quickWins: [
-          `Found ${items.length} sellable items worth $${totalValue} total`,
+          `Found ${items.length} sellable items worth $${Math.round(totalValue)} total`,
           'Background removal processing in your browser (FREE!)',
           'Professional product photos ready for listing'
         ]
@@ -159,6 +219,8 @@ module.exports = async function handler(req, res) {
       errorMessage = 'Invalid API key. Please check your Gemini API key.';
     } else if (error.message?.includes('RATE_LIMIT_EXCEEDED')) {
       errorMessage = 'Rate limit exceeded. Please try again in a moment.';
+    } else if (error.message?.includes('PERMISSION_DENIED')) {
+      errorMessage = 'API key does not have permission to use Gemini. Please check your API key settings.';
     }
     
     res.status(500).json({
