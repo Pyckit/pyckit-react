@@ -381,29 +381,31 @@ const EditModal = ({ item, onSave, onClose, onList }) => {
           />
         </div>
         
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
           <button
             onClick={handleSave}
             style={{
               flex: 1,
-              padding: '14px 24px',
-              background: 'white',
-              color: '#333',
-              border: '2px solid #e0e0e0',
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: '600',
+              padding: '10px 20px',
+              background: 'transparent',
+              color: '#666',
+              border: '1px solid #ddd',
+              borderRadius: 6,
+              fontSize: 15,
+              fontWeight: '500',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }}
             onMouseEnter={(e) => {
-              e.target.style.borderColor = '#333';
-              e.target.style.background = '#fafafa';
+              e.target.style.borderColor = '#999';
+              e.target.style.color = '#333';
+              e.target.style.background = '#f8f8f8';
             }}
             onMouseLeave={(e) => {
-              e.target.style.borderColor = '#e0e0e0';
-              e.target.style.background = 'white';
+              e.target.style.borderColor = '#ddd';
+              e.target.style.color = '#666';
+              e.target.style.background = 'transparent';
             }}
           >
             Save
@@ -412,24 +414,24 @@ const EditModal = ({ item, onSave, onClose, onList }) => {
             onClick={handleList}
             style={{
               flex: 1,
-              padding: '14px 24px',
-              background: '#333',
+              padding: '10px 20px',
+              background: '#000',
               color: 'white',
-              border: '2px solid #333',
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: '600',
+              border: '1px solid #000',
+              borderRadius: 6,
+              fontSize: 15,
+              fontWeight: '500',
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }}
             onMouseEnter={(e) => {
-              e.target.style.background = '#000';
-              e.target.style.borderColor = '#000';
-            }}
-            onMouseLeave={(e) => {
               e.target.style.background = '#333';
               e.target.style.borderColor = '#333';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = '#000';
+              e.target.style.borderColor = '#000';
             }}
           >
             List Item
