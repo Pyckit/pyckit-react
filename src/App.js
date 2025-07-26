@@ -586,80 +586,30 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// New function to process items with visual indicators
+// Simplified function - just use original image for all items
 async function processItemsLocally(items, imageFile, onProgress) {
   try {
-    onProgress(1, 1, 'Processing items');
+    onProgress(1, 1, 'Processing image');
     
-    // Create a canvas for the original image
-    const img = new Image();
-    const originalCanvas = document.createElement('canvas');
-    const originalCtx = originalCanvas.getContext('2d');
+    // Convert the original image to a data URL
+    const reader = new FileReader();
     
-    return new Promise((resolve) => {
-      img.onload = async () => {
-        originalCanvas.width = img.width;
-        originalCanvas.height = img.height;
-        originalCtx.drawImage(img, 0, 0);
+    return new Promise((resolve, reject) => {
+      reader.onload = (e) => {
+        const originalImageUrl = e.target.result;
         
-        // Process each item individually
-        const processedItems = await Promise.all(items.map(async (item, index) => {
-          try {
-            // Create a canvas for this specific item
-            const itemCanvas = document.createElement('canvas');
-            const itemCtx = itemCanvas.getContext('2d');
-            
-            // Calculate crop dimensions for this specific item
-            const padding = 0.3; // 30% padding
-            const centerX = (item.boundingBox.x / 100) * img.width;
-            const centerY = (item.boundingBox.y / 100) * img.height;
-            const boxWidth = (item.boundingBox.width / 100) * img.width;
-            const boxHeight = (item.boundingBox.height / 100) * img.height;
-            
-            // Calculate crop area with padding
-            const cropWidth = boxWidth * (1 + padding);
-            const cropHeight = boxHeight * (1 + padding);
-            const cropX = Math.max(0, centerX - cropWidth / 2);
-            const cropY = Math.max(0, centerY - cropHeight / 2);
-            
-            // Set canvas size to cropped dimensions
-            itemCanvas.width = Math.min(cropWidth, img.width - cropX);
-            itemCanvas.height = Math.min(cropHeight, img.height - cropY);
-            
-            // Draw white background
-            itemCtx.fillStyle = '#ffffff';
-            itemCtx.fillRect(0, 0, itemCanvas.width, itemCanvas.height);
-            
-            // Draw the cropped portion of the original image
-            itemCtx.drawImage(
-              img,
-              cropX, cropY, itemCanvas.width, itemCanvas.height,
-              0, 0, itemCanvas.width, itemCanvas.height
-            );
-            
-            // Convert to data URL
-            const processedImage = itemCanvas.toDataURL('image/jpeg', 0.9);
-            
-            return {
-              ...item,
-              processedImage: processedImage,
-              processed: true
-            };
-            
-          } catch (error) {
-            console.error(`Failed to process ${item.name}:`, error);
-            return {
-              ...item,
-              processed: false,
-              error: error.message
-            };
-          }
+        // Apply the original image to all items
+        const processedItems = items.map(item => ({
+          ...item,
+          processedImage: originalImageUrl,
+          processed: true
         }));
         
         resolve(processedItems);
       };
       
-      img.src = URL.createObjectURL(imageFile);
+      reader.onerror = reject;
+      reader.readAsDataURL(imageFile);
     });
     
   } catch (error) {
