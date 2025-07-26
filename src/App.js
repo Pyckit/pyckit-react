@@ -586,58 +586,84 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// New function to process entire image with background removal (no cropping)
+// New function to process items with visual indicators
 async function processItemsLocally(items, imageFile, onProgress) {
   try {
-    // Process the entire image once instead of cropping
-    onProgress(1, 1, 'Processing entire image');
+    onProgress(1, 1, 'Processing items');
     
-    // Remove background from the full image
-    let removedBgBlob;
-    try {
-      removedBgBlob = await removeBackground(imageFile);
-      console.log('Background removal successful');
-    } catch (bgError) {
-      console.error('Background removal failed:', bgError);
-      // If background removal fails, use original image
-      removedBgBlob = imageFile;
-    }
-    
-    // Create final image with clean background
+    // Create a canvas for the original image
     const img = new Image();
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const originalCanvas = document.createElement('canvas');
+    const originalCtx = originalCanvas.getContext('2d');
     
     return new Promise((resolve) => {
       img.onload = async () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
+        originalCanvas.width = img.width;
+        originalCanvas.height = img.height;
+        originalCtx.drawImage(img, 0, 0);
         
-        // White background (change this if you want different color)
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw the image with removed background
-        ctx.drawImage(img, 0, 0);
-        
-        const finalImage = canvas.toDataURL('image/jpeg', 0.9);
-        
-        // Apply the same processed image to all items
-        const processedItems = items.map(item => ({
-          ...item,
-          processedImage: finalImage,
-          processed: true
+        // Process each item individually
+        const processedItems = await Promise.all(items.map(async (item, index) => {
+          try {
+            // Create a canvas for this specific item
+            const itemCanvas = document.createElement('canvas');
+            const itemCtx = itemCanvas.getContext('2d');
+            
+            // Calculate crop dimensions for this specific item
+            const padding = 0.3; // 30% padding
+            const centerX = (item.boundingBox.x / 100) * img.width;
+            const centerY = (item.boundingBox.y / 100) * img.height;
+            const boxWidth = (item.boundingBox.width / 100) * img.width;
+            const boxHeight = (item.boundingBox.height / 100) * img.height;
+            
+            // Calculate crop area with padding
+            const cropWidth = boxWidth * (1 + padding);
+            const cropHeight = boxHeight * (1 + padding);
+            const cropX = Math.max(0, centerX - cropWidth / 2);
+            const cropY = Math.max(0, centerY - cropHeight / 2);
+            
+            // Set canvas size to cropped dimensions
+            itemCanvas.width = Math.min(cropWidth, img.width - cropX);
+            itemCanvas.height = Math.min(cropHeight, img.height - cropY);
+            
+            // Draw white background
+            itemCtx.fillStyle = '#ffffff';
+            itemCtx.fillRect(0, 0, itemCanvas.width, itemCanvas.height);
+            
+            // Draw the cropped portion of the original image
+            itemCtx.drawImage(
+              img,
+              cropX, cropY, itemCanvas.width, itemCanvas.height,
+              0, 0, itemCanvas.width, itemCanvas.height
+            );
+            
+            // Convert to data URL
+            const processedImage = itemCanvas.toDataURL('image/jpeg', 0.9);
+            
+            return {
+              ...item,
+              processedImage: processedImage,
+              processed: true
+            };
+            
+          } catch (error) {
+            console.error(`Failed to process ${item.name}:`, error);
+            return {
+              ...item,
+              processed: false,
+              error: error.message
+            };
+          }
         }));
         
         resolve(processedItems);
       };
       
-      img.src = URL.createObjectURL(removedBgBlob);
+      img.src = URL.createObjectURL(imageFile);
     });
     
   } catch (error) {
-    console.error('Failed to process image:', error);
-    // Return items without processed images
+    console.error('Failed to process items:', error);
     return items.map(item => ({
       ...item,
       processed: false,
@@ -706,9 +732,9 @@ export default function App() {
           const data = await response.json();
           
           if (data.success) {
-            // Step 2: Process backgrounds locally
-            console.log('Processing background removal...');
-            setProcessingStatus({ current: 1, total: 1, currentItem: 'Removing background from image' });
+            // Step 2: Process items with individual cropping
+            console.log('Processing items...');
+            setProcessingStatus({ current: 0, total: data.items.length });
             
             const processedItems = await processItemsLocally(
               data.items, 
