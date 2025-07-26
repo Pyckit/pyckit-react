@@ -586,102 +586,64 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// New function to process items locally with background removal
+// New function to process entire image with background removal (no cropping)
 async function processItemsLocally(items, imageFile, onProgress) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const img = new Image();
-  
-  return new Promise((resolve) => {
-    img.onload = async () => {
-      const processedItems = [];
-      
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        onProgress(i + 1, items.length, item.name);
-        
-        try {
-          // Calculate crop dimensions with MORE padding
-          const padding = 0.8;  // 80% padding for TESTING - see if we need more
-          let x = (item.boundingBox.x / 100) * img.width;
-          let y = (item.boundingBox.y / 100) * img.height;
-          let width = (item.boundingBox.width / 100) * img.width;
-          let height = (item.boundingBox.height / 100) * img.height;
-          
-          // Add padding
-          const padX = width * padding;
-          const padY = height * padding;
-          x = Math.max(0, x - padX);
-          y = Math.max(0, y - padY);
-          width = Math.min(width + (padX * 2), img.width - x);
-          height = Math.min(height + (padY * 2), img.height - y);
-          
-          // Crop the image
-          canvas.width = width;
-          canvas.height = height;
-          ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
-          
-          const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-          
-          // Remove background using client-side library
-          let removedBgBlob;
-          try {
-            removedBgBlob = await removeBackground(croppedBlob);
-          } catch (bgError) {
-            console.error('Background removal failed, using original:', bgError);
-            removedBgBlob = croppedBlob;
-          }
-          
-          // Create final image with DARK BACKGROUND FOR TESTING
-          const finalCanvas = document.createElement('canvas');
-          const finalCtx = finalCanvas.getContext('2d');
-          finalCanvas.width = width;
-          finalCanvas.height = height;
-          
-          // DARK BACKGROUND FOR TESTING - helps verify cropping/padding
-          finalCtx.fillStyle = '#2a2a2a'; // Dark gray
-          finalCtx.fillRect(0, 0, width, height);
-          
-          // Optional: Add subtle gradient for testing visibility
-          const gradient = finalCtx.createLinearGradient(0, 0, width, height);
-          gradient.addColorStop(0, '#333333');
-          gradient.addColorStop(1, '#1a1a1a');
-          finalCtx.fillStyle = gradient;
-          finalCtx.fillRect(0, 0, width, height);
-          
-          // Draw transparent image on dark background
-          const transparentImg = new Image();
-          await new Promise((imgResolve) => {
-            transparentImg.onload = () => {
-              finalCtx.drawImage(transparentImg, 0, 0);
-              imgResolve();
-            };
-            transparentImg.src = URL.createObjectURL(removedBgBlob);
-          });
-          
-          const finalImage = finalCanvas.toDataURL('image/jpeg', 0.9);
-          
-          processedItems.push({
-            ...item,
-            processedImage: finalImage,
-            processed: true
-          });
-          
-        } catch (error) {
-          console.error(`Failed to process ${item.name}:`, error);
-          processedItems.push({
-            ...item,
-            processed: false,
-            error: error.message
-          });
-        }
-      }
-      
-      resolve(processedItems);
-    };
+  try {
+    // Process the entire image once instead of cropping
+    onProgress(1, 1, 'Processing entire image');
     
-    img.src = URL.createObjectURL(imageFile);
-  });
+    // Remove background from the full image
+    let removedBgBlob;
+    try {
+      removedBgBlob = await removeBackground(imageFile);
+      console.log('Background removal successful');
+    } catch (bgError) {
+      console.error('Background removal failed:', bgError);
+      // If background removal fails, use original image
+      removedBgBlob = imageFile;
+    }
+    
+    // Create final image with clean background
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    return new Promise((resolve) => {
+      img.onload = async () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // White background (change this if you want different color)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw the image with removed background
+        ctx.drawImage(img, 0, 0);
+        
+        const finalImage = canvas.toDataURL('image/jpeg', 0.9);
+        
+        // Apply the same processed image to all items
+        const processedItems = items.map(item => ({
+          ...item,
+          processedImage: finalImage,
+          processed: true
+        }));
+        
+        resolve(processedItems);
+      };
+      
+      img.src = URL.createObjectURL(removedBgBlob);
+    });
+    
+  } catch (error) {
+    console.error('Failed to process image:', error);
+    // Return items without processed images
+    return items.map(item => ({
+      ...item,
+      processed: false,
+      error: error.message
+    }));
+  }
 }
 
 // Main App Component
@@ -745,8 +707,8 @@ export default function App() {
           
           if (data.success) {
             // Step 2: Process backgrounds locally
-            console.log('Processing backgrounds locally...');
-            setProcessingStatus({ current: 0, total: data.items.length });
+            console.log('Processing background removal...');
+            setProcessingStatus({ current: 1, total: 1, currentItem: 'Removing background from image' });
             
             const processedItems = await processItemsLocally(
               data.items, 
