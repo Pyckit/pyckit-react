@@ -647,38 +647,42 @@ async function processItemsLocally(items, imageFile, onProgress) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Calculate crop with reasonable padding
-            const padding = 0.2; // 20% padding instead of 100%
-            const centerX = (item.boundingBox.x / 100) * img.width;
-            const centerY = (item.boundingBox.y / 100) * img.height;
-            const baseWidth = (item.boundingBox.width / 100) * img.width;
-            const baseHeight = (item.boundingBox.height / 100) * img.height;
+            // Convert percentage coordinates to pixels
+            // boundingBox x,y is CENTER of object, width/height are percentages
+            const itemCenterX = (item.boundingBox.x / 100) * img.width;
+            const itemCenterY = (item.boundingBox.y / 100) * img.height;
+            const itemWidth = (item.boundingBox.width / 100) * img.width;
+            const itemHeight = (item.boundingBox.height / 100) * img.height;
             
-            // Add padding to dimensions
-            const cropWidth = baseWidth * (1 + padding);
-            const cropHeight = baseHeight * (1 + padding);
+            // Calculate the top-left corner of the item
+            const itemLeft = itemCenterX - (itemWidth / 2);
+            const itemTop = itemCenterY - (itemHeight / 2);
             
-            // Calculate crop position (ensuring we don't go outside image bounds)
-            const cropX = Math.max(0, centerX - cropWidth / 2);
-            const cropY = Math.max(0, centerY - cropHeight / 2);
+            // Add a small padding (10% of item size)
+            const padding = 0.1;
+            const paddingX = itemWidth * padding;
+            const paddingY = itemHeight * padding;
             
-            // Ensure we don't exceed image dimensions
-            const finalWidth = Math.min(cropWidth, img.width - cropX);
-            const finalHeight = Math.min(cropHeight, img.height - cropY);
+            // Calculate crop area with padding
+            const cropX = Math.max(0, itemLeft - paddingX);
+            const cropY = Math.max(0, itemTop - paddingY);
+            const cropWidth = Math.min(itemWidth + (paddingX * 2), img.width - cropX);
+            const cropHeight = Math.min(itemHeight + (paddingY * 2), img.height - cropY);
             
-            canvas.width = finalWidth;
-            canvas.height = finalHeight;
+            // Set canvas to exact crop size
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
             
             // White background
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw cropped area
+            // Draw only the cropped portion
             ctx.drawImage(
               img,
-              cropX, cropY, finalWidth, finalHeight,
-              0, 0, finalWidth, finalHeight
-            );
+              cropX, cropY, cropWidth, cropHeight,  // Source rectangle
+              0, 0, cropWidth, cropHeight           // Destination rectangle
+            )
             
             processedItems.push({
               ...item,
