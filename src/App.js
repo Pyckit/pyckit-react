@@ -616,6 +616,9 @@ async function processItemsLocally(items, imageFile, onProgress) {
     img.onload = async () => {
       const processedItems = [];
       
+      // Log image dimensions for debugging
+      console.log(`Processing image with dimensions: ${img.width}x${img.height}`);
+      
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         onProgress(i + 1, items.length, item.name);
@@ -633,9 +636,12 @@ async function processItemsLocally(items, imageFile, onProgress) {
             continue;
           }
           
+          console.log(`Processing item ${i + 1}/${items.length}: ${item.name}`);
+          console.log(`Bounding box:`, item.boundingBox);
+          
           // If we have a segmentation mask from the backend, use it
           if (item.hasSegmentation && item.segmentationMask) {
-            // Apply the mask to isolate the object
+            console.log(`Using SAM segmentation for ${item.name}`);
             const isolatedImage = await applySegmentationMask(img, item.segmentationMask, item.boundingBox);
             processedItems.push({
               ...item,
@@ -644,134 +650,183 @@ async function processItemsLocally(items, imageFile, onProgress) {
             });
           } else {
             // Fallback to simple cropping
+            console.log(`Using simple cropping for ${item.name}`);
+            
             const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
             
-            // Convert percentage coordinates to pixels
-            // boundingBox x,y is CENTER of object, width/height are percentages
-            const itemCenterX = (item.boundingBox.x / 100) * img.width;
-            const itemCenterY = (item.boundingBox.y / 100) * img.height;
-            const itemWidth = (item.boundingBox.width / 100) * img.width;
-            const itemHeight = (item.boundingBox.height / 100) * img.height;
+            // The bounding box from the AI uses center coordinates and percentage dimensions
+            const centerX = (item.boundingBox.x / 100) * img.width;
+            const centerY = (item.boundingBox.y / 100) * img.height;
+            const boxWidth = (item.boundingBox.width / 100) * img.width;
+            const boxHeight = (item.boundingBox.height / 100) * img.height;
             
-            // Calculate the top-left corner of the item
-            const itemLeft = itemCenterX - (itemWidth / 2);
-            const itemTop = itemCenterY - (itemHeight / 2);
+            // Calculate top-left corner from center point
+            const left = centerX - (boxWidth / 2);
+            const top = centerY - (boxHeight / 2);
             
-            // Add a small padding (10% of item size)
-            const padding = 0.1;
-            const paddingX = itemWidth * padding;
-            const paddingY = itemHeight * padding;
+            // Add 15% padding around the detected object
+            const paddingFactor = 0.15;
+            const padX = boxWidth * paddingFactor;
+            const padY = boxHeight * paddingFactor;
             
-            // Calculate crop area with padding
-            const cropX = Math.max(0, itemLeft - paddingX);
-            const cropY = Math.max(0, itemTop - paddingY);
-            const cropWidth = Math.min(itemWidth + (paddingX * 2), img.width - cropX);
-            const cropHeight = Math.min(itemHeight + (paddingY * 2), img.height - cropY);
+            // Calculate final crop area with bounds checking
+            const cropX = Math.max(0, Math.floor(left - padX));
+            const cropY = Math.max(0, Math.floor(top - padY));
+            const cropWidth = Math.min(Math.ceil(boxWidth + (2 * padX)), img.width - cropX);
+            const cropHeight = Math.min(Math.ceil(boxHeight + (2 * padY)), img.height - cropY);
             
-            // Set canvas to exact crop size
+            console.log(`Crop coordinates for ${item.name}:`);
+            console.log(`  Source: x=${cropX}, y=${cropY}, w=${cropWidth}, h=${cropHeight}`);
+            console.log(`  Canvas size: ${cropWidth}x${cropHeight}`);
+            
+            // Set canvas size to match crop dimensions
             canvas.width = cropWidth;
             canvas.height = cropHeight;
             
-            // White background
+            // Fill with white background first
             ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, cropWidth, cropHeight);
             
-            // Draw only the cropped portion
-            ctx.drawImage(
-              img,
-              cropX, cropY, cropWidth, cropHeight,  // Source rectangle
-              0, 0, cropWidth, cropHeight           // Destination rectangle
-            )
-            
-            processedItems.push({
-              ...item,
-              processedImage: canvas.toDataURL('image/jpeg', 0.95),
-              processed: false
-            });
+            // Draw the cropped portion of the image
+            try {
+              ctx.drawImage(
+                img,                                    // source image
+                cropX, cropY, cropWidth, cropHeight,   // source rectangle
+                0, 0, cropWidth, cropHeight            // destination rectangle
+              );
+              
+              // Convert to data URL
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+              
+              processedItems.push({
+                ...item,
+                processedImage: dataUrl,
+                processed: false,
+                cropInfo: { cropX, cropY, cropWidth, cropHeight } // For debugging
+              });
+              
+              console.log(`Successfully cropped ${item.name}`);
+            } catch (drawError) {
+              console.error(`Error drawing ${item.name}:`, drawError);
+              processedItems.push({
+                ...item,
+                processedImage: URL.createObjectURL(imageFile),
+                processed: false,
+                error: drawError.message
+              });
+            }
           }
         } catch (error) {
           console.error(`Failed to process ${item.name}:`, error);
           processedItems.push({
             ...item,
             processedImage: URL.createObjectURL(imageFile),
-            processed: false
+            processed: false,
+            error: error.message
           });
         }
       }
       
+      console.log(`Finished processing ${processedItems.length} items`);
       resolve(processedItems);
     };
     
-    img.src = URL.createObjectURL(imageFile);
+    img.onerror = (error) => {
+      console.error('Failed to load image:', error);
+      resolve([]);
+    };
+    
+    // Create object URL for the image file
+    const imageUrl = URL.createObjectURL(imageFile);
+    img.src = imageUrl;
   });
 }
 
-// Helper function to apply segmentation mask
 async function applySegmentationMask(img, maskData, boundingBox) {
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   
-  // Calculate crop area with smaller padding
-  const padding = 0.2; // 20% padding
+  console.log(`Applying segmentation mask with bbox:`, boundingBox);
+  
+  // Convert percentage coordinates to pixels (same logic as simple cropping)
   const centerX = (boundingBox.x / 100) * img.width;
   const centerY = (boundingBox.y / 100) * img.height;
-  const baseWidth = (boundingBox.width / 100) * img.width;
-  const baseHeight = (boundingBox.height / 100) * img.height;
+  const boxWidth = (boundingBox.width / 100) * img.width;
+  const boxHeight = (boundingBox.height / 100) * img.height;
   
-  // Add padding
-  const width = baseWidth * (1 + padding);
-  const height = baseHeight * (1 + padding);
+  // Calculate top-left corner from center point
+  const left = centerX - (boxWidth / 2);
+  const top = centerY - (boxHeight / 2);
   
-  // Calculate crop position
-  const cropX = Math.max(0, centerX - width / 2);
-  const cropY = Math.max(0, centerY - height / 2);
+  // Add 15% padding
+  const paddingFactor = 0.15;
+  const padX = boxWidth * paddingFactor;
+  const padY = boxHeight * paddingFactor;
+  
+  // Calculate final crop area
+  const cropX = Math.max(0, Math.floor(left - padX));
+  const cropY = Math.max(0, Math.floor(top - padY));
+  const cropWidth = Math.min(Math.ceil(boxWidth + (2 * padX)), img.width - cropX);
+  const cropHeight = Math.min(Math.ceil(boxHeight + (2 * padY)), img.height - cropY);
   
   // Set canvas size
-  const finalWidth = Math.min(width, img.width - cropX);
-  const finalHeight = Math.min(height, img.height - cropY);
-  
-  canvas.width = finalWidth;
-  canvas.height = finalHeight;
+  canvas.width = cropWidth;
+  canvas.height = cropHeight;
   
   // White background
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, cropWidth, cropHeight);
   
   // If we have mask data, apply it
   if (maskData && typeof maskData === 'string') {
-    // Create mask image
-    const maskImg = new Image();
-    await new Promise((resolve) => {
-      maskImg.onload = resolve;
-      maskImg.src = maskData;
-    });
-    
-    // Draw the original image
-    ctx.drawImage(
-      img,
-      cropX, cropY, finalWidth, finalHeight,
-      0, 0, finalWidth, finalHeight
-    );
-    
-    // Apply mask using composite operation
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(maskImg, 0, 0, finalWidth, finalHeight);
-    
-    // Reset composite operation and add white background
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    try {
+      // Create mask image
+      const maskImg = new Image();
+      await new Promise((resolve, reject) => {
+        maskImg.onload = resolve;
+        maskImg.onerror = reject;
+        maskImg.src = maskData;
+      });
+      
+      // Draw the original image
+      ctx.drawImage(
+        img,
+        cropX, cropY, cropWidth, cropHeight,
+        0, 0, cropWidth, cropHeight
+      );
+      
+      // Apply mask using composite operation
+      ctx.globalCompositeOperation = 'destination-in';
+      
+      // Scale mask to match crop dimensions
+      ctx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
+      
+      // Reset composite operation and add white background
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, cropWidth, cropHeight);
+      
+      console.log(`Successfully applied mask`);
+    } catch (maskError) {
+      console.error('Error applying mask, falling back to simple crop:', maskError);
+      // Fall back to simple crop
+      ctx.drawImage(
+        img,
+        cropX, cropY, cropWidth, cropHeight,
+        0, 0, cropWidth, cropHeight
+      );
+    }
   } else {
     // Just crop without mask
     ctx.drawImage(
       img,
-      cropX, cropY, finalWidth, finalHeight,
-      0, 0, finalWidth, finalHeight
+      cropX, cropY, cropWidth, cropHeight,
+      0, 0, cropWidth, cropHeight
     );
   }
   
-  return canvas.toDataURL('image/jpeg', 0.95);
+  return canvas.toDataURL('image/jpeg', 0.9);
 }
 
 // Main App Component
