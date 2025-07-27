@@ -889,6 +889,23 @@ export default function App() {
           const data = await response.json();
           console.log('Backend response:', data);
           
+          // ADD THIS DEBUG CODE TEMPORARILY
+          console.log('=== BACKEND DEBUG ===');
+          console.log('Success:', data.success);
+          console.log('Total Value:', data.totalValue);
+          console.log('Number of items:', data.items ? data.items.length : 'NO ITEMS');
+          
+          if (data.items && data.items.length > 0) {
+            console.log('First item structure:');
+            console.log(JSON.stringify(data.items[0], null, 2));
+            
+            // Check for segmentation data
+            const itemsWithSegmentation = data.items.filter(item => item.hasSegmentation);
+            console.log(`Items with segmentation: ${itemsWithSegmentation.length}/${data.items.length}`);
+          }
+          console.log('=== END DEBUG ===');
+          // END OF DEBUG CODE
+          
           if (data.success) {
             // Validate items array
             if (!data.items || !Array.isArray(data.items)) {
