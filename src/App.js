@@ -239,32 +239,11 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
       </button>
       
       <div className="item-image-container">
-        {item.processedImage || item.stagedImage ? (
-          <img 
-            src={item.processedImage || item.stagedImage}
-            alt={item.name || 'Detected item'}
-            onError={(e) => {
-              console.error('Error loading image:', item.processedImage || item.stagedImage);
-              e.target.onerror = null;
-              e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNjY2MiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0ibHVjaWRlIGx1Y2lkZS1pbWFnZS1vZmYiPjxwYXRoIGQ9Ik0xOCAxMy4xN2E1Ljg4IDUuODggMCAwIDAtMS44Ni0xLjM2bS0yLjkyLS4xM2E2LjEgNi4xIDAgMCAwLTEuNTQuMzkiLz48cGF0aCBkPSJNOCA0YTEgMSAwIDAgMSAxLTEgNiA2IDAgMCAxIDQuNjkgMTAiLz48cGF0aCBkPSJtMTAgMTAgMS4zMy0uNjljLjI0LS4xMi41Mi0uMTkuOC0uMmguMTZjLjIzLjAxLjQ1LjA4LjY1LjJMMTYgMTIiLz48cGF0aCBkPSJNMyAxOGE2IDYgMCAwIDEgOS4zMy00Ii8+PHBhdGggZD0ibTIgMiAyMCAyMCIvPjwvc3ZnPg==';
-              e.target.style.padding = '2rem';
-              e.target.style.opacity = '0.5';
-            }}
-          />
-        ) : (
-          <div style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#f8f9fa',
-            color: '#6c757d',
-            fontSize: '0.875rem'
-          }}>
-            No image available
-          </div>
-        )}
+        <img 
+          src={item.processedImage || item.stagedImage || 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22100%22%20height%3D%22100%22%20viewBox%3D%220%200%20100%20100%22%3E%3Crect%20width%3D%22100%22%20height%3D%22100%22%20fill%3D%22%23f0f0f0%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2250%22%20text-anchor%3D%22middle%22%20dy%3D%22.3em%22%20fill%3D%22%23999%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3ENo%20Image%3C%2Ftext%3E%3C%2Fsvg%3E'}
+          alt={item.name || 'Detected item'}
+          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+        />
       </div>
       
       <div className="item-details">
@@ -759,12 +738,17 @@ async function processItemsLocally(items, imageFile, onProgress) {
               offsetX, offsetY, cropWidth, cropHeight
             );
             
+            const processedImageUrl = canvas.toDataURL('image/jpeg', 0.95);
             processedItems.push({
               ...item,
-              processedImage: canvas.toDataURL('image/jpeg', 0.95),
+              processedImage: processedImageUrl,
               processed: true,
               cropInfo: { cropX, cropY, cropWidth, cropHeight }
             });
+            
+            // Debug log the processed image URL
+            console.log(`Item ${item.name || 'unnamed'} processed image preview:`, 
+              processedImageUrl.substring(0, 50) + '...');
             
           } catch (drawError) {
             console.error(`Error drawing ${item.name}:`, drawError);
