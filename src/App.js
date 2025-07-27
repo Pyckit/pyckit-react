@@ -586,40 +586,113 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// Simplified function - just use original image for all items
+// Improved cropping function for individual items
 async function processItemsLocally(items, imageFile, onProgress) {
-  try {
-    onProgress(1, 1, 'Processing image');
-    
-    // Convert the original image to a data URL
-    const reader = new FileReader();
-    
-    return new Promise((resolve, reject) => {
-      reader.onload = (e) => {
-        const originalImageUrl = e.target.result;
-        
-        // Apply the original image to all items
-        const processedItems = items.map(item => ({
-          ...item,
-          processedImage: originalImageUrl,
-          processed: true
-        }));
-        
-        resolve(processedItems);
-      };
+  const img = new Image();
+  
+  return new Promise((resolve) => {
+    img.onload = async () => {
+      const processedItems = [];
       
-      reader.onerror = reject;
-      reader.readAsDataURL(imageFile);
-    });
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        onProgress(i + 1, items.length, item.name);
+        
+        try {
+          // Create canvas for this specific item
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // Convert bounding box percentages to pixels
+          const centerX = (item.boundingBox.x / 100) * img.width;
+          const centerY = (item.boundingBox.y / 100) * img.height;
+          const boxWidth = (item.boundingBox.width / 100) * img.width;
+          const boxHeight = (item.boundingBox.height / 100) * img.height;
+          
+          // Calculate crop area with generous padding (100% extra)
+          const padding = 1.0;
+          const cropWidth = boxWidth * (1 + padding);
+          const cropHeight = boxHeight * (1 + padding);
+          
+          // Calculate top-left corner of crop area
+          const cropX = Math.max(0, centerX - cropWidth / 2);
+          const cropY = Math.max(0, centerY - cropHeight / 2);
+          
+          // Ensure we don't exceed image boundaries
+          const finalWidth = Math.min(cropWidth, img.width - cropX);
+          const finalHeight = Math.min(cropHeight, img.height - cropY);
+          
+          // Set canvas size to the cropped dimensions
+          canvas.width = finalWidth;
+          canvas.height = finalHeight;
+          
+          // Fill with white background
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          // Draw the cropped portion of the image
+          ctx.drawImage(
+            img,
+            cropX, cropY, finalWidth, finalHeight,  // Source rectangle
+            0, 0, finalWidth, finalHeight           // Destination rectangle
+          );
+          
+          // Try to apply background removal to the cropped image
+          let finalImage;
+          try {
+            const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+            const removedBgBlob = await removeBackground(croppedBlob);
+            
+            // Create a new canvas for the final image with background removed
+            const finalCanvas = document.createElement('canvas');
+            const finalCtx = finalCanvas.getContext('2d');
+            finalCanvas.width = canvas.width;
+            finalCanvas.height = canvas.height;
+            
+            // White background
+            finalCtx.fillStyle = '#ffffff';
+            finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+            
+            // Draw the background-removed image
+            const bgRemovedImg = new Image();
+            await new Promise((imgResolve) => {
+              bgRemovedImg.onload = () => {
+                finalCtx.drawImage(bgRemovedImg, 0, 0);
+                imgResolve();
+              };
+              bgRemovedImg.src = URL.createObjectURL(removedBgBlob);
+            });
+            
+            finalImage = finalCanvas.toDataURL('image/jpeg', 0.9);
+          } catch (bgError) {
+            console.error('Background removal failed for', item.name, '- using cropped image');
+            // If background removal fails, use the cropped image
+            finalImage = canvas.toDataURL('image/jpeg', 0.9);
+          }
+          
+          processedItems.push({
+            ...item,
+            processedImage: finalImage,
+            processed: true
+          });
+          
+        } catch (error) {
+          console.error(`Failed to process ${item.name}:`, error);
+          // If processing fails, use the original image
+          processedItems.push({
+            ...item,
+            processedImage: URL.createObjectURL(imageFile),
+            processed: false,
+            error: error.message
+          });
+        }
+      }
+      
+      resolve(processedItems);
+    };
     
-  } catch (error) {
-    console.error('Failed to process items:', error);
-    return items.map(item => ({
-      ...item,
-      processed: false,
-      error: error.message
-    }));
-  }
+    img.src = URL.createObjectURL(imageFile);
+  });
 }
 
 // Main App Component
@@ -682,8 +755,8 @@ export default function App() {
           const data = await response.json();
           
           if (data.success) {
-            // Step 2: Process items with individual cropping
-            console.log('Processing items...');
+            // Step 2: Process items with individual cropping and background removal
+            console.log('Processing items individually...');
             setProcessingStatus({ current: 0, total: data.items.length });
             
             const processedItems = await processItemsLocally(
