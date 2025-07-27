@@ -22,7 +22,29 @@ function getImageDimensions(base64) {
   return { width: 1024, height: 1024 };
 }
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Enhanced delay with jitter for better rate limiting
+const delay = (ms, addJitter = true) => {
+  const jitter = addJitter ? Math.random() * 1000 : 0; // Up to 1s jitter
+  return new Promise(resolve => setTimeout(resolve, ms + jitter));
+};
+
+// Retry helper with exponential backoff
+const withRetry = async (fn, maxRetries = 3, baseDelay = 1000) => {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxRetries) break;
+      
+      const delayMs = baseDelay * Math.pow(2, attempt - 1);
+      console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`, error.message);
+      await delay(delayMs);
+    }
+  }
+  throw lastError;
+};
 
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called');
@@ -125,48 +147,97 @@ module.exports = async function handler(req, res) {
 
     // SAM segmentation if token exists
     if (replicateToken && items.length > 0) {
-      console.log('Starting SAM segmentation...');
+      console.log(`Starting SAM segmentation for ${items.length} items...`);
       const replicate = new Replicate({ auth: replicateToken });
       
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (i > 0) await delay(2000); // Rate limiting
-        
-        const { x, y, width, height } = item.boundingBox;
-        const imgW = imageDimensions.width;
-        const imgH = imageDimensions.height;
-        const x1 = Math.round((x - width / 2) / 100 * imgW);
-        const y1 = Math.round((y - height / 2) / 100 * imgH);
-        const x2 = Math.round((x + width / 2) / 100 * imgW);
-        const y2 = Math.round((y + height / 2) / 100 * imgH);
-
-        try {
-          console.log(`Processing ${item.name} with SAM...`);
-          const output = await replicate.run(
-            "meta/sam-2-large:4641a058359ca2f5fc5b0a61afb7aed95c1aaa9c079c08346a67f51b261715a5",
-            {
-              input: {
-                image: `data:image/jpeg;base64,${image}`,
-                box: `${x1} ${y1} ${x2} ${y2}`,
-                model_size: "large",
-                multimask_output: false
-              }
-            }
-          );
+      // Track progress
+      let processedCount = 0;
+      let successCount = 0;
+      const updateInterval = setInterval(() => {
+        console.log(`SAM Progress: ${processedCount}/${items.length} items processed (${successCount} successful)`);
+      }, 2000);
+      
+      try {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          processedCount++;
           
-          if (output?.[0]) {
-            item.segmentationMask = output[0];
-            item.hasSegmentation = true;
-            console.log(`✓ Segmentation mask added for ${item.name}`);
-          } else {
+          // Dynamic rate limiting based on item size and position in queue
+          const baseDelay = i === 0 ? 0 : 1500; // Shorter delay for first item
+          await delay(baseDelay);
+          
+          const { x, y, width, height } = item.boundingBox;
+          const imgW = imageDimensions.width;
+          const imgH = imageDimensions.height;
+          
+          // Add slight padding to bounding box (5% of box size)
+          const padding = 0.05;
+          const padX = width * padding / 100 * imgW;
+          const padY = height * padding / 100 * imgH;
+          
+          const x1 = Math.max(0, Math.round((x - width / 2) / 100 * imgW - padX));
+          const y1 = Math.max(0, Math.round((y - height / 2) / 100 * imgH - padY));
+          const x2 = Math.min(imgW, Math.round((x + width / 2) / 100 * imgW + padX));
+          const y2 = Math.min(imgH, Math.round((y + height / 2) / 100 * imgH + padY));
+          
+          // Skip if box is too small
+          if ((x2 - x1) < 10 || (y2 - y1) < 10) {
+            console.log(`Skipping ${item.name} - bounding box too small`);
             item.hasSegmentation = false;
-            console.log(`✗ No mask returned for ${item.name}`);
+            continue;
           }
-        } catch (e) {
-          console.error(`SAM failed for ${item.name}:`, e.message);
-          item.hasSegmentation = false;
-          if (e.message?.includes('429')) break; // Stop on rate limit
+
+          console.log(`Processing ${item.name} with SAM (${x1},${y1} to ${x2},${y2})...`);
+          
+          try {
+            const output = await withRetry(async () => {
+              return await replicate.run(
+                "meta/sam-2-large:4641a058359ca2f5fc5b0a61afb7aed95c1aaa9c079c08346a67f51b261715a5",
+                {
+                  input: {
+                    image: `data:image/jpeg;base64,${image}`,
+                    box: `${x1} ${y1} ${x2} ${y2}`,
+                    model_size: "large",
+                    multimask_output: false,
+                    points_per_side: 32, // Higher for better quality
+                    pred_iou_thresh: 0.88, // Higher threshold for better quality
+                    stability_score_thresh: 0.92, // Higher threshold for better quality
+                    crop_n_layers: 1, // Add one crop layer for better edge cases
+                    crop_n_points_downscale_factor: 1,
+                    min_mask_region_area: 100 // Ignore small mask regions
+                  }
+                }
+              );
+            }, 3, 1000); // 3 retries with exponential backoff
+            
+            if (output?.[0]) {
+              item.segmentationMask = output[0];
+              item.hasSegmentation = true;
+              successCount++;
+              console.log(`✓ Segmentation mask added for ${item.name}`);
+              
+              // Log mask stats
+              const maskSize = Math.round((item.segmentationMask.length * 3) / 4);
+              console.log(`  Mask size: ${maskSize} bytes`);
+            } else {
+              item.hasSegmentation = false;
+              console.log(`✗ No mask returned for ${item.name}`);
+            }
+          } catch (e) {
+            console.error(`SAM failed for ${item.name} after retries:`, e.message);
+            item.hasSegmentation = false;
+            if (e.response?.status === 429) {
+              console.warn('Rate limit hit, pausing SAM processing');
+              await delay(30000); // Longer pause on rate limit
+            }
+          }
         }
+      } catch (error) {
+        console.error('Error during SAM processing:', error);
+        throw error; // Re-throw to be caught by the outer try-catch
+      } finally {
+        clearInterval(updateInterval);
+        console.log(`SAM processing complete: ${successCount}/${items.length} items successfully processed`);
       }
     } else {
       console.log('No SAM segmentation (token missing or no items)');

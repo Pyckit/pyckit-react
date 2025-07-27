@@ -63,6 +63,36 @@ const WelcomeScreen = ({ onFileSelect }) => {
   );
 };
 
+// Helper function to get non-transparent bounds from image data
+function getNonTransparentBounds(imageData, width, height) {
+  let minX = width, minY = height, maxX = 0, maxY = 0;
+  let hasContent = false;
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const alpha = imageData[idx + 3];
+      
+      if (alpha > 10) { // Threshold for non-transparent
+        hasContent = true;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  
+  if (!hasContent) return null;
+  
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1
+  };
+}
+
 const ApiKeyPrompt = ({ onSave }) => {
   const [apiKey, setApiKey] = useState('');
   
@@ -585,28 +615,6 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// Helper function to get mask bounds
-function getMaskBounds(mask, width, height) {
-  let minX = width, minY = height, maxX = 0, maxY = 0;
-  
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x] > 0.5) {
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
-    }
-  }
-  
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  };
-}
 
 // Updated function to handle segmentation masks from backend
 async function processItemsLocally(items, imageFile, onProgress) {
@@ -662,21 +670,21 @@ async function processItemsLocally(items, imageFile, onProgress) {
           
           // Fallback to simple cropping if no segmentation or if it failed
           console.log(`Using simple cropping for ${item.name}`);
-          
+
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          
-          // Calculate crop area with TIGHTER padding (5% instead of 15%)
-          const padding = 0.05; // Much tighter crop
+
+          // Calculate crop area with slightly larger padding for fallback (10% instead of 5%)
+          const padding = 0.1; // Slightly more padding for non-masked items
           const centerX = (item.boundingBox.x / 100) * img.width;
           const centerY = (item.boundingBox.y / 100) * img.height;
           const boxWidth = (item.boundingBox.width / 100) * img.width;
           const boxHeight = (item.boundingBox.height / 100) * img.height;
-          
-          // Calculate crop area with minimal padding
+
+          // Calculate crop area with padding
           const padX = boxWidth * padding;
           const padY = boxHeight * padding;
-          
+
           const cropX = Math.max(0, Math.floor(centerX - boxWidth/2 - padX));
           const cropY = Math.max(0, Math.floor(centerY - boxHeight/2 - padY));
           const cropWidth = Math.min(
@@ -687,7 +695,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
             Math.ceil(boxHeight + 2 * padY), 
             img.height - cropY
           );
-          
+
           // Skip if crop area is invalid
           if (cropWidth <= 0 || cropHeight <= 0) {
             console.error(`Invalid crop dimensions for ${item.name}: ${cropWidth}x${cropHeight}`);
@@ -699,20 +707,26 @@ async function processItemsLocally(items, imageFile, onProgress) {
             });
             continue;
           }
-          
-          // Make canvas square to match your reference (optional)
+
+          // Make canvas square to match the segmented items
           const maxDim = Math.max(cropWidth, cropHeight);
           canvas.width = maxDim;
           canvas.height = maxDim;
-          
-          // PURE WHITE BACKGROUND
+
+          // Pure white background
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
+
+          // Add subtle shadow for consistency
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+          ctx.shadowBlur = 8;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 2;
+
           // Center the cropped image in the square canvas
           const offsetX = (maxDim - cropWidth) / 2;
           const offsetY = (maxDim - cropHeight) / 2;
-          
+
           // Draw the cropped portion centered
           try {
             ctx.drawImage(
@@ -720,12 +734,6 @@ async function processItemsLocally(items, imageFile, onProgress) {
               cropX, cropY, cropWidth, cropHeight,
               offsetX, offsetY, cropWidth, cropHeight
             );
-            
-            // Optional: Add subtle shadow for depth (like your reference)
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-            ctx.shadowBlur = 10;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 2;
             
             processedItems.push({
               ...item,
@@ -794,12 +802,12 @@ async function applySegmentationMask(img, maskData, boundingBox) {
     const boxWidth = (boundingBox.width / 100) * img.width;
     const boxHeight = (boundingBox.height / 100) * img.height;
     
-    // Calculate crop area with padding (15% of object size)
-    const padding = 0.15;
-    const padX = boxWidth * padding;
-    const padY = boxHeight * padding;
+    // Initial padding for mask application (20% to ensure we capture the full object)
+    const initialPadding = 0.2;
+    const padX = boxWidth * initialPadding;
+    const padY = boxHeight * initialPadding;
     
-    // Calculate crop coordinates with bounds checking
+    // Calculate initial crop coordinates
     const cropX = Math.max(0, Math.floor(centerX - boxWidth/2 - padX));
     const cropY = Math.max(0, Math.floor(centerY - boxHeight/2 - padY));
     const cropWidth = Math.min(
@@ -816,7 +824,7 @@ async function applySegmentationMask(img, maskData, boundingBox) {
       throw new Error(`Invalid crop dimensions: ${cropWidth}x${cropHeight}`);
     }
     
-    // Set canvas size
+    // Set initial canvas size
     canvas.width = cropWidth;
     canvas.height = cropHeight;
     
@@ -843,16 +851,75 @@ async function applySegmentationMask(img, maskData, boundingBox) {
           0, 0, cropWidth, cropHeight
         );
         
-        // Apply mask
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
+        // Create temporary canvas to process the mask
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.width = cropWidth;
+        tempCanvas.height = cropHeight;
         
-        // Reset composite operation and ensure white background
+        // Draw and scale the mask to match the crop area
+        tempCtx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
+        
+        // Apply mask with proper alignment
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(tempCanvas, 0, 0);
+        
+        // Reset composite operation
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Get the actual bounds of the masked object
+        const imageData = ctx.getImageData(0, 0, cropWidth, cropHeight);
+        const bounds = getNonTransparentBounds(imageData.data, cropWidth, cropHeight);
+        
+        if (bounds) {
+          // Add small padding to the tight bounds (5% of object size)
+          const tightPadding = 0.05;
+          const tightPadX = Math.max(10, bounds.width * tightPadding);
+          const tightPadY = Math.max(10, bounds.height * tightPadding);
+          
+          // Calculate final dimensions (make it square for consistent display)
+          const finalSize = Math.max(
+            bounds.width + 2 * tightPadX,
+            bounds.height + 2 * tightPadY
+          );
+          
+          // Create final canvas with square dimensions
+          const finalCanvas = document.createElement('canvas');
+          const finalCtx = finalCanvas.getContext('2d');
+          finalCanvas.width = finalSize;
+          finalCanvas.height = finalSize;
+          
+          // Fill with white background
+          finalCtx.fillStyle = '#ffffff';
+          finalCtx.fillRect(0, 0, finalSize, finalSize);
+          
+          // Add subtle shadow for depth
+          finalCtx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+          finalCtx.shadowBlur = 8;
+          finalCtx.shadowOffsetX = 0;
+          finalCtx.shadowOffsetY = 2;
+          
+          // Calculate centering offsets
+          const offsetX = (finalSize - bounds.width) / 2;
+          const offsetY = (finalSize - bounds.height) / 2;
+          
+          // Draw the tightly cropped masked object centered
+          finalCtx.drawImage(
+            canvas,
+            bounds.x, bounds.y, bounds.width, bounds.height,
+            offsetX, offsetY, bounds.width, bounds.height
+          );
+          
+          console.log('Successfully applied segmentation mask with tight cropping');
+          return finalCanvas.toDataURL('image/jpeg', 0.95);
+        }
+        
+        // If bounds detection failed, fall back to the original masked image
         ctx.globalCompositeOperation = 'destination-over';
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, cropWidth, cropHeight);
         
-        console.log('Successfully applied segmentation mask');
+        console.log('Applied segmentation mask without tight cropping');
         
       } catch (maskError) {
         console.error('Error applying mask, falling back to simple crop:', maskError);
