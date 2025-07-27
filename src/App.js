@@ -185,130 +185,118 @@ const ProcessingStatus = ({ current, total, currentItem }) => (
   </div>
 );
 
-const ItemCard = ({ item, index, onEdit, onRemove }) => (
-  <div 
-    className="item-card" 
-    onClick={() => {
-      console.log('Card clicked - opening edit modal for index:', index);
-      onEdit(index);
-    }}
-    style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      cursor: 'pointer',
-      position: 'relative',
-      minHeight: '520px'
-    }}
-  >
-    <button 
-      className="remove-btn"
-      onClick={(e) => {
-        e.stopPropagation();
-        onRemove(index);
-      }}
-      style={{
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        background: '#ff4444',
-        color: 'white',
-        border: 'none',
-        borderRadius: '50%',
-        width: 30,
-        height: 30,
-        cursor: 'pointer',
-        fontSize: 18,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1
-      }}
-    >
-      ×
-    </button>
-    
-    <img 
-      className="item-thumbnail-large" 
-      src={item.processedImage || item.stagedImage || '#'}
-      alt={item.name}
-      style={{ backgroundColor: item.processedImage ? 'white' : '#f0f0f0' }}
-    />
-    <div className="item-name">{item.name}</div>
-    <div className="item-value">${item.value}</div>
-    <div className="item-details" style={{ flexGrow: 1 }}>
-      <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name ? item.name.toLowerCase() : 'item'}. Well-maintained and ready for immediate use.`}</p>
-      <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
-    </div>
-    <span className="confidence-badge">{item.confidence}% match</span>
-    
-    <div 
-      style={{ 
-        display: 'flex', 
-        gap: 8, 
-        marginTop: 'auto',
-        paddingTop: 12
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        onClick={() => onEdit(index)}
+const ItemCard = ({ item, index, onEdit, onRemove }) => {
+  const handleEdit = (e) => {
+    e.stopPropagation();
+    console.log('Edit clicked - opening edit modal for index:', index);
+    onEdit(index);
+  };
+
+  const handleRemove = (e) => {
+    e.stopPropagation();
+    onRemove(index);
+  };
+
+  const handleList = (e) => {
+    e.stopPropagation();
+    alert(`Listed: ${item.name} for $${item.value}`);
+  };
+
+  return (
+    <div className="item-card">
+      <button 
+        className="remove-btn"
+        onClick={handleRemove}
         style={{
-          flex: 1,
-          padding: '8px 16px',
-          background: 'transparent',
-          color: '#666',
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          fontSize: 14,
-          fontWeight: '500',
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          background: 'rgba(255, 255, 255, 0.9)',
+          color: '#ff4444',
+          border: 'none',
+          borderRadius: '50%',
+          width: 28,
+          height: 28,
           cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+          fontSize: 18,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          transition: 'all 0.2s ease'
         }}
-        onMouseEnter={(e) => {
-          e.target.style.borderColor = '#999';
-          e.target.style.color = '#333';
-          e.target.style.background = '#f8f8f8';
+        onMouseOver={(e) => {
+          e.target.style.background = '#ff4444';
+          e.target.style.color = 'white';
         }}
-        onMouseLeave={(e) => {
-          e.target.style.borderColor = '#ddd';
-          e.target.style.color = '#666';
-          e.target.style.background = 'transparent';
+        onMouseOut={(e) => {
+          e.target.style.background = 'rgba(255, 255, 255, 0.9)';
+          e.target.style.color = '#ff4444';
         }}
       >
-        Edit
+        ×
       </button>
-      <button
-        onClick={() => alert(`Listed: ${item.name} for $${item.value}`)}
-        style={{
-          flex: 1,
-          padding: '8px 16px',
-          background: '#000',
-          color: 'white',
-          border: '1px solid #000',
-          borderRadius: 6,
-          fontSize: 14,
-          fontWeight: '500',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.background = '#333';
-          e.target.style.borderColor = '#333';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = '#000';
-          e.target.style.borderColor = '#000';
-        }}
-      >
-        List Item
-      </button>
+      
+      <div className="item-image-container">
+        <img 
+          src={item.processedImage || item.stagedImage || '#'}
+          alt={item.name}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            padding: '1rem',
+            backgroundColor: item.processedImage ? 'white' : '#f8f9fa'
+          }}
+        />
+      </div>
+      
+      <div className="item-details">
+        <h3 className="item-name">
+          {item.name}
+          {item.confidence && (
+            <span className="confidence-badge">
+              {Math.round(item.confidence)}%
+            </span>
+          )}
+        </h3>
+        
+        <div className="item-price">
+          {item.value.toFixed(2)}
+        </div>
+        
+        {item.condition && (
+          <span className="item-condition">
+            {item.condition}
+          </span>
+        )}
+        
+        <p className="item-description">
+          {item.description || `${item.condition || 'Good'} condition ${item.name ? item.name.toLowerCase() : 'item'}. Well-maintained and ready for immediate use.`}
+        </p>
+        
+        <div className="item-actions">
+          <button 
+            className="btn btn-outline"
+            onClick={handleEdit}
+          >
+            <span>Edit</span>
+          </button>
+          <button 
+            className="btn btn-primary"
+            onClick={handleList}
+          >
+            <span>List Item</span>
+          </button>
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const EditModal = ({ item, onSave, onClose, onList }) => {
   const [title, setTitle] = useState(item.name);
