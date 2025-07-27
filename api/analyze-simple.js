@@ -66,7 +66,8 @@ module.exports = async function handler(req, res) {
     5. description: Brief description (1-2 sentences)
     6. confidence: Score 0-100
     
-    Return ONLY a JSON array of items with lowercase property names.`;
+    IMPORTANT: Use camelCase for all property names (boundingBox not boundingbox).
+    Return ONLY a JSON array of items.`;
 
     const result = await model.generateContent([prompt, imageData]);
     const response = await result.response;
@@ -76,15 +77,26 @@ module.exports = async function handler(req, res) {
     text = text.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
     let items = JSON.parse(text);
     
-    // Normalize property names to lowercase
+    // Normalize property names to camelCase
     items = items.map(item => {
       const normalizedItem = {};
+      
+      // Convert all keys to camelCase
       for (const key in item) {
-        const lowerKey = key.charAt(0).toLowerCase() + key.slice(1);
-        normalizedItem[lowerKey] = item[key];
+        let camelKey = key;
+        
+        // Special handling for boundingbox -> boundingBox
+        if (key.toLowerCase() === 'boundingbox') {
+          camelKey = 'boundingBox';
+        } else if (key !== key.charAt(0).toLowerCase() + key.slice(1)) {
+          // Convert PascalCase to camelCase
+          camelKey = key.charAt(0).toLowerCase() + key.slice(1);
+        }
+        
+        normalizedItem[camelKey] = item[key];
       }
       
-      // Ensure boundingBox is properly structured
+      // Ensure boundingBox is properly structured (use the actual detected values)
       if (normalizedItem.boundingBox && typeof normalizedItem.boundingBox === 'object') {
         normalizedItem.boundingBox = {
           x: normalizedItem.boundingBox.x || 50,
@@ -92,6 +104,15 @@ module.exports = async function handler(req, res) {
           width: normalizedItem.boundingBox.width || 20,
           height: normalizedItem.boundingBox.height || 20
         };
+      } else if (normalizedItem.boundingbox && typeof normalizedItem.boundingbox === 'object') {
+        // Handle all lowercase version
+        normalizedItem.boundingBox = {
+          x: normalizedItem.boundingbox.x || 50,
+          y: normalizedItem.boundingbox.y || 50,
+          width: normalizedItem.boundingbox.width || 20,
+          height: normalizedItem.boundingbox.height || 20
+        };
+        delete normalizedItem.boundingbox; // Remove the lowercase version
       } else {
         // Provide default if missing
         normalizedItem.boundingBox = { x: 50, y: 50, width: 20, height: 20 };
