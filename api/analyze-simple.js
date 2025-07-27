@@ -59,14 +59,14 @@ module.exports = async function handler(req, res) {
     };
 
     const prompt = `Analyze this room photo and identify ALL sellable items you can see. For each item, provide:
-    1. Name: Be specific with brand/model if visible
-    2. Value: Estimated resale value in CAD for Calgary market
-    3. Condition: Excellent/Very Good/Good/Fair
-    4. BoundingBox: The location as percentages where x,y is the CENTER: {"x": %, "y": %, "width": %, "height": %}
-    5. Description: Brief description (1-2 sentences)
-    6. Confidence: Score 0-100
+    1. name: Be specific with brand/model if visible
+    2. value: Estimated resale value in CAD for Calgary market (number only, no $ symbol)
+    3. condition: Excellent/Very Good/Good/Fair
+    4. boundingBox: The location as percentages where x,y is the CENTER: {"x": %, "y": %, "width": %, "height": %}
+    5. description: Brief description (1-2 sentences)
+    6. confidence: Score 0-100
     
-    Return ONLY a JSON array of items.`;
+    Return ONLY a JSON array of items with lowercase property names.`;
 
     const result = await model.generateContent([prompt, imageData]);
     const response = await result.response;
@@ -75,6 +75,36 @@ module.exports = async function handler(req, res) {
     // Parse response
     text = text.replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
     let items = JSON.parse(text);
+    
+    // Normalize property names to lowercase
+    items = items.map(item => {
+      const normalizedItem = {};
+      for (const key in item) {
+        const lowerKey = key.charAt(0).toLowerCase() + key.slice(1);
+        normalizedItem[lowerKey] = item[key];
+      }
+      
+      // Ensure boundingBox is properly structured
+      if (normalizedItem.boundingBox && typeof normalizedItem.boundingBox === 'object') {
+        normalizedItem.boundingBox = {
+          x: normalizedItem.boundingBox.x || 50,
+          y: normalizedItem.boundingBox.y || 50,
+          width: normalizedItem.boundingBox.width || 20,
+          height: normalizedItem.boundingBox.height || 20
+        };
+      } else {
+        // Provide default if missing
+        normalizedItem.boundingBox = { x: 50, y: 50, width: 20, height: 20 };
+      }
+      
+      // Ensure required fields exist
+      normalizedItem.name = normalizedItem.name || 'Unknown Item';
+      normalizedItem.value = parseFloat(normalizedItem.value) || 50;
+      normalizedItem.condition = normalizedItem.condition || 'Good';
+      normalizedItem.confidence = normalizedItem.confidence || 75;
+      
+      return normalizedItem;
+    });
     
     console.log(`Found ${items.length} items`);
 

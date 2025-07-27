@@ -208,7 +208,7 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => (
     <div className="item-value">${item.value}</div>
     <div className="item-details" style={{ flexGrow: 1 }}>
       <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name.toLowerCase()}. Well-maintained and ready for immediate use.`}</p>
+      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name ? item.name.toLowerCase() : 'item'}. Well-maintained and ready for immediate use.`}</p>
       <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
     </div>
     <span className="confidence-badge">{item.confidence}% match</span>
@@ -621,6 +621,18 @@ async function processItemsLocally(items, imageFile, onProgress) {
         onProgress(i + 1, items.length, item.name);
         
         try {
+          // Validate item has required properties
+          if (!item || !item.boundingBox || typeof item.boundingBox.x === 'undefined') {
+            console.error('Invalid item structure:', item);
+            processedItems.push({
+              ...item,
+              name: item?.name || 'Unknown Item',
+              processedImage: URL.createObjectURL(imageFile),
+              processed: false
+            });
+            continue;
+          }
+          
           // If we have a segmentation mask from the backend, use it
           if (item.hasSegmentation && item.segmentationMask) {
             // Apply the mask to isolate the object
@@ -798,10 +810,17 @@ export default function App() {
           }
           
           const data = await response.json();
+          console.log('Backend response:', data);
           
           if (data.success) {
+            // Validate items array
+            if (!data.items || !Array.isArray(data.items)) {
+              throw new Error('Invalid response: missing items array');
+            }
+            
             // Step 2: Process items with individual cropping and background removal
             console.log('Processing items individually...');
+            console.log('Items from backend:', data.items);
             setProcessingStatus({ current: 0, total: data.items.length });
             
             const processedItems = await processItemsLocally(
