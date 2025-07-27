@@ -147,10 +147,10 @@ module.exports = async function handler(req, res) {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       
-      // Rate limiting
+      // Rate limiting - 10 seconds between requests
       if (i > 0) {
-        console.log(`Waiting 2s before processing next item (rate limiting)...`);
-        await delay(2000);
+        console.log(`Waiting 10s before processing next item (rate limiting)...`);
+        await delay(10000);
       }
       
       // Calculate pixel coordinates with padding
