@@ -1,6 +1,32 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 
+// Helper function to get actual image dimensions from base64
+function getImageDimensions(base64) {
+  const buffer = Buffer.from(base64, 'base64');
+  
+  // For JPEG
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+    let offset = 2;
+    let block_length = buffer[offset] * 256 + buffer[offset + 1];
+    while (offset < buffer.length) {
+      offset += block_length;
+      if (offset >= buffer.length) break;
+      if (buffer[offset] !== 0xFF) break;
+      if (buffer[offset + 1] === 0xC0 || buffer[offset + 1] === 0xC2) {
+        const height = buffer[offset + 5] * 256 + buffer[offset + 6];
+        const width = buffer[offset + 7] * 256 + buffer[offset + 8];
+        return { width, height };
+      }
+      offset += 2;
+      block_length = buffer[offset] * 256 + buffer[offset + 1];
+    }
+  }
+  
+  // Default if we can't determine
+  return { width: 1024, height: 1024 };
+}
+
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called');
   
@@ -45,6 +71,10 @@ module.exports = async function handler(req, res) {
         error: 'Server configuration error - Gemini API key not found' 
       });
     }
+
+    // Get actual image dimensions
+    const imageDimensions = getImageDimensions(image);
+    console.log('Image dimensions:', imageDimensions);
 
     // Step 1: Use Gemini to detect objects
     console.log('Detecting objects with Gemini...');
@@ -131,46 +161,73 @@ module.exports = async function handler(req, res) {
 
     // Step 2: If Replicate token exists, use SAM for segmentation
     if (replicateToken && items.length > 0) {
-      console.log('Using Replicate SAM for object segmentation...');
-      const replicate = new Replicate({ auth: replicateToken });
+      console.log('REPLICATE_API_TOKEN found, attempting SAM segmentation...');
       
-      // Process each item with SAM
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        console.log(`Processing ${item.name} with SAM...`);
+      try {
+        const replicate = new Replicate({ auth: replicateToken });
         
-        try {
-          // Convert percentage bbox to pixel coordinates (assuming 1024x1024 for now)
-          const imageSize = 1024; // You might want to detect actual size
-          const x1 = (item.boundingBox.x - item.boundingBox.width/2) / 100 * imageSize;
-          const y1 = (item.boundingBox.y - item.boundingBox.height/2) / 100 * imageSize;
-          const x2 = (item.boundingBox.x + item.boundingBox.width/2) / 100 * imageSize;
-          const y2 = (item.boundingBox.y + item.boundingBox.height/2) / 100 * imageSize;
+        // Process each item with SAM
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          console.log(`Processing ${item.name} with SAM...`);
           
-          // Run SAM segmentation
-          const output = await replicate.run(
-            "cjwbw/segment-anything:64be0c64e8b6145dcce5e452bdba333654b91196d04c3987d7dd86abd3b1ebe7",
-            {
-              input: {
-                image: `data:image/jpeg;base64,${image}`,
-                input_box: `${Math.round(x1)},${Math.round(y1)},${Math.round(x2)},${Math.round(y2)}`,
-                multimask_output: false,
-                return_logits: false
+          try {
+            // Convert percentage bbox to pixel coordinates
+            const { width: imgWidth, height: imgHeight } = imageDimensions;
+            
+            // Calculate pixel coordinates from percentages
+            const centerX = (item.boundingBox.x / 100) * imgWidth;
+            const centerY = (item.boundingBox.y / 100) * imgHeight;
+            const boxWidth = (item.boundingBox.width / 100) * imgWidth;
+            const boxHeight = (item.boundingBox.height / 100) * imgHeight;
+            
+            // Convert to corner coordinates for SAM
+            const x1 = Math.round(centerX - boxWidth / 2);
+            const y1 = Math.round(centerY - boxHeight / 2);
+            const x2 = Math.round(centerX + boxWidth / 2);
+            const y2 = Math.round(centerY + boxHeight / 2);
+            
+            console.log(`SAM input box for ${item.name}: ${x1},${y1},${x2},${y2}`);
+            
+            // Run SAM segmentation
+            const output = await replicate.run(
+              "cjwbw/segment-anything:64be0c64e8b6145dcce5e452bdba333654b91196d04c3987d7dd86abd3b1ebe7",
+              {
+                input: {
+                  image: `data:image/jpeg;base64,${image}`,
+                  input_box: `${x1},${y1},${x2},${y2}`,
+                  multimask_output: false,
+                  return_logits: false
+                }
               }
+            );
+            
+            console.log(`SAM output for ${item.name}:`, output ? 'Success' : 'Failed');
+            
+            // Add segmentation mask to item
+            if (output && output.masks && output.masks.length > 0) {
+              item.segmentationMask = output.masks[0];
+              item.hasSegmentation = true;
+              console.log(`✓ Segmentation mask added for ${item.name}`);
+            } else {
+              item.hasSegmentation = false;
+              console.log(`✗ No mask returned for ${item.name}`);
             }
-          );
-          
-          // Add segmentation mask to item
-          if (output && output.masks) {
-            item.segmentationMask = output.masks[0];
-            item.hasSegmentation = true;
+            
+          } catch (segError) {
+            console.error(`SAM segmentation failed for ${item.name}:`, segError.message);
+            item.hasSegmentation = false;
           }
-          
-        } catch (segError) {
-          console.error(`SAM segmentation failed for ${item.name}:`, segError);
-          item.hasSegmentation = false;
         }
+      } catch (replicateError) {
+        console.error('Replicate initialization failed:', replicateError.message);
+        // Mark all items as no segmentation
+        items.forEach(item => item.hasSegmentation = false);
       }
+    } else {
+      console.log('No REPLICATE_API_TOKEN found or no items to process');
+      // Mark all items as no segmentation
+      items.forEach(item => item.hasSegmentation = false);
     }
     
     // Calculate total value
@@ -180,6 +237,7 @@ module.exports = async function handler(req, res) {
     }, 0);
 
     console.log('Analysis complete');
+    console.log(`Segmentation summary: ${items.filter(i => i.hasSegmentation).length}/${items.length} items have masks`);
     
     res.status(200).json({
       success: true,
@@ -188,7 +246,9 @@ module.exports = async function handler(req, res) {
       insights: {
         quickWins: [
           `Found ${items.length} sellable items worth $${Math.round(totalValue)} total`,
-          'Professional object isolation with SAM technology',
+          items.some(i => i.hasSegmentation) 
+            ? 'Professional object isolation with SAM technology' 
+            : 'Basic object detection (SAM not available)',
           'Ready for individual product listings'
         ]
       }
