@@ -200,4 +200,4 @@ module.exports.config = {
       sizeLimit: '50mb',
     },
   },
-}
+};
