@@ -862,30 +862,6 @@ async function applySegmentationMask(img, maskData, boundingBox) {
   }
 }
 
-function getNonTransparentBounds(imageData, width, height) {
-  let minX = width, minY = height, maxX = 0, maxY = 0;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const alpha = imageData[(y * width + x) * 4 + 3]; // A channel
-      if (alpha > 10) {
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y);
-      }
-    }
-  }
-  if (minX > maxX || minY > maxY) {
-    return { x: 0, y: 0, width: width, height: height };
-  }
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  };
-}
-
 // Main App Component
 export default function App() {
   const [hasApiKey, setHasApiKey] = useState(false);
