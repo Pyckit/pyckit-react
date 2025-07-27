@@ -56,24 +56,22 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    // Enhanced prompt with clarity about using only inferred data
+    // Detailed prompt to ensure proper camelCase and structure
     const prompt = `Analyze this room photo and identify ALL sellable items. Return ONLY a JSON array where each object has these exact properties (use camelCase):
-    - name: string (specific item name, inferred from the image, e.g., type of furniture or decor, include brand if visible)
-    - value: number (estimated resale value in CAD, number only, based on item type and condition)
-    - condition: string (must be: Excellent, Very Good, Good, or Fair, inferred from visual cues)
+    - name: string (specific item name, include brand if visible)
+    - value: number (estimated resale value in CAD, number only)
+    - condition: string (must be: Excellent, Very Good, Good, or Fair)
     - boundingBox: object with {x: number, y: number, width: number, height: number} where x,y is CENTER as percentages
-    - description: string (1-2 sentence description based on inferred item and condition)
-    - confidence: number (0-100 confidence score based on detection accuracy)
+    - description: string (1-2 sentence description)
+    - confidence: number (0-100 confidence score)
     
-    IMPORTANT: Use only inferred data from the image. Do not use generic placeholders or reuse example values.
-    
-    Example format (dynamic, no specific items hardcoded):
+    Example format:
     [{
-      "name": "Modern Armchair",
-      "value": 300,
+      "name": "Yellow Armchair",
+      "value": 400,
       "condition": "Excellent",
       "boundingBox": {"x": 50, "y": 70, "width": 25, "height": 30},
-      "description": "Stylish modern armchair in excellent condition with vibrant upholstery.",
+      "description": "Modern mustard yellow accent chair in excellent condition",
       "confidence": 95
     }]`;
 
@@ -89,49 +87,41 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       console.error('Failed to parse Gemini response:', e.message);
       console.error('Response text:', text.substring(0, 200) + '...');
-      items = []; // No static fallback data
+      items = [];
     }
 
     console.log(`Found ${items.length} items from Gemini`);
 
-    // Validate and dynamically generate items without static data
+    // Normalize and validate items with better fallbacks
     items = items.map((item, i) => {
-      const normalizedBox = item.boundingBox || {};
-      const inferredCondition = ['Excellent', 'Very Good', 'Good', 'Fair'].includes(item.condition) ? item.condition : 'Good';
-      const inferredName = item.name && item.name.trim() !== '' ? item.name : `Detected Item ${i + 1}`;
-      const inferredValue = parseFloat(item.value) || Math.floor(Math.random() * 200) + 50; // Random reasonable value if missing
-      const inferredDescription = item.description && item.description.trim() !== '' 
-        ? item.description 
-        : `${inferredCondition} condition ${inferredName.toLowerCase()}. Item appears to be in ${inferredCondition.toLowerCase()} condition based on visual inspection.`;
-
+      // Handle both camelCase and other variations
+      const normalizedBox = item.boundingBox || item.BoundingBox || item.boundingbox || {};
+      
+      // Better fallback names and descriptions
+      const itemName = item.name && item.name !== 'Unknown Item' 
+        ? item.name 
+        : `Item ${i + 1}`;
+      
+      const itemCondition = item.condition || 'Good';
+      
+      const itemDescription = item.description && item.description !== 'Item detected in image'
+        ? item.description
+        : `${itemCondition} condition item. Well-maintained and ready for immediate use.`;
+      
       return {
-        name: inferredName,
-        value: inferredValue,
-        condition: inferredCondition,
+        name: itemName,
+        value: parseFloat(item.value) || 50,
+        condition: itemCondition,
         boundingBox: {
           x: normalizedBox.x || 50,
           y: normalizedBox.y || 50,
           width: normalizedBox.width || 20,
           height: normalizedBox.height || 20
         },
-        description: inferredDescription,
+        description: itemDescription,
         confidence: item.confidence || 75
       };
     });
-
-    // Dynamic value adjustment option (can be removed if not desired)
-    // This section adjusts values proportionally to reach a target total
-    const targetTotal = 1150; // Can make this configurable or remove entirely
-    if (items.length > 0) {
-      const currentTotal = items.reduce((sum, i) => sum + i.value, 0);
-      if (currentTotal > 0 && Math.abs(currentTotal - targetTotal) > 100) {
-        const adjustment = targetTotal / currentTotal;
-        items = items.map(item => ({
-          ...item,
-          value: Math.round(item.value * adjustment)
-        }));
-      }
-    }
 
     // SAM segmentation if token exists
     if (replicateToken && items.length > 0) {
@@ -184,7 +174,7 @@ module.exports = async function handler(req, res) {
     }
 
     const totalValue = items.reduce((sum, i) => sum + i.value, 0);
-    console.log(`Analysis complete: ${items.length} items, total value $${totalValue}`);
+    console.log(`Analysis complete: ${items.filter(i => i.hasSegmentation).length}/${items.length} items have masks`);
 
     res.status(200).json({
       success: true,
@@ -200,7 +190,6 @@ module.exports = async function handler(req, res) {
     });
   } catch (error) {
     console.error('Analysis error:', error.message);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 };
