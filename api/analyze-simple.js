@@ -147,10 +147,10 @@ module.exports = async function handler(req, res) {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       
-      // Rate limiting - 10 seconds between requests
+      // Rate limiting - increase delay to avoid 429 errors
       if (i > 0) {
-        console.log(`Waiting 10s before processing next item (rate limiting)...`);
-        await delay(10000);
+        console.log(`Waiting 5s before processing next item (rate limiting)...`);
+        await delay(5000);
       }
       
       // Calculate pixel coordinates with padding
@@ -167,15 +167,16 @@ module.exports = async function handler(req, res) {
       const y2 = Math.min(imgH, Math.round((y / 100 * imgH) + boxH / 2));
 
       try {
-        console.log(`Processing ${item.name} with SAM...`);
+        console.log(`Processing ${item.name} with SAM-2...`);
         console.log(`  Coordinates: (${x1}, ${y1}) to (${x2}, ${y2})`);
         
+        // Using SAM-2 without version hash - let Replicate use the latest
         const output = await replicate.run(
-          "meta/sam-2-large:4641a058359ca2f5fc5b0a61afb7aed95c1aaa9c079c08346a67f51b261715a5",
+          "meta/sam-2-large",
           {
             input: {
               image: `data:image/jpeg;base64,${image}`,
-              box: `${x1} ${y1} ${x2} ${y2}`,
+              box: `${x1} ${y1} ${x2} ${y2}`,  // String format as per SAM-2 spec
               model_size: "large",
               multimask_output: false
             }
@@ -186,13 +187,42 @@ module.exports = async function handler(req, res) {
           throw new Error('SAM returned no mask');
         }
         
+        // SAM-2 returns base64 PNG masks
         item.segmentationMask = output[0];
         item.hasSegmentation = true;
         item.cropCoords = { x1, y1, x2, y2 };
-        console.log(`✓ SAM segmentation successful for ${item.name}`);
+        console.log(`✓ SAM-2 segmentation successful for ${item.name}`);
         
       } catch (e) {
         console.error(`✗ SAM FAILED for ${item.name}:`, e.message);
+        
+        // If it's a version error, try without version
+        if (e.message?.includes('version') || e.message?.includes('422')) {
+          console.log('Retrying with latest SAM-2 version...');
+          try {
+            const output = await replicate.run(
+              "meta/sam-2",  // Try without size specification
+              {
+                input: {
+                  image: `data:image/jpeg;base64,${image}`,
+                  box: `${x1} ${y1} ${x2} ${y2}`,
+                  multimask_output: false
+                }
+              }
+            );
+            
+            if (output && output[0]) {
+              item.segmentationMask = output[0];
+              item.hasSegmentation = true;
+              item.cropCoords = { x1, y1, x2, y2 };
+              console.log(`✓ SAM-2 segmentation successful on retry for ${item.name}`);
+              continue;
+            }
+          } catch (retryError) {
+            console.error(`Retry also failed: ${retryError.message}`);
+          }
+        }
+        
         failedItems.push({ name: item.name, error: e.message });
         
         // Check for rate limiting
