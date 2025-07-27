@@ -243,14 +243,24 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
           src={item.processedImage || item.stagedImage || '#'}
           alt={item.name}
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
+            backgroundColor: item.processedImage ? 'white' : '#f8f9fa',
+            maxWidth: '90%',
+            maxHeight: '90%',
             objectFit: 'contain',
-            padding: '1rem',
-            backgroundColor: item.processedImage ? 'white' : '#f8f9fa'
+            objectPosition: 'center',
+            transition: 'transform 0.3s ease'
+          }}
+          onLoad={(e) => {
+            // Center the image within the container
+            const img = e.target;
+            const container = img.parentElement;
+            if (img.naturalWidth > img.naturalHeight) {
+              img.style.width = '100%';
+              img.style.height = 'auto';
+            } else {
+              img.style.width = 'auto';
+              img.style.height = '90%';
+            }
           }}
         />
       </div>
