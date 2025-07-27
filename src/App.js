@@ -239,10 +239,10 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
       </button>
       
       <div className="item-image-container">
-        <img 
-          src={item.thumbnail || item.image || item.processedImage || item.stagedImage || 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22100%22%20height%3D%22100%22%20viewBox%3D%220%200%20100%20100%22%3E%3Crect%20width%3D%22100%22%20height%3D%22100%22%20fill%3D%22%23f0f0f0%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2250%22%20text-anchor%3D%22middle%22%20dy%3D%22.3em%22%20fill%3D%22%23999%22%20font-family%3D%22sans-serif%22%20font-size%3D%2214%22%3ENo%20Image%3C%2Ftext%3E%3C%2Fsvg%3E'}
+        <img
+          src={item.thumbnail || item.image}
           alt={item.name || 'Detected item'}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          className="item-image"
         />
       </div>
       
@@ -848,31 +848,24 @@ async function applySegmentationMask(img, maskData, boundingBox) {
     const croppedData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const bounds = getNonTransparentBounds(croppedData.data, canvas.width, canvas.height);
 
-    // Create square canvas based on largest dimension
-    const finalSize = Math.max(bounds.width, bounds.height);
+    // Final square canvas output
+    const squareSize = Math.max(bounds.width, bounds.height);
     const squareCanvas = document.createElement('canvas');
+    squareCanvas.width = squareSize;
+    squareCanvas.height = squareSize;
     const squareCtx = squareCanvas.getContext('2d');
-    squareCanvas.width = finalSize;
-    squareCanvas.height = finalSize;
 
-    // Fill with white background
+    // White background
     squareCtx.fillStyle = '#ffffff';
-    squareCtx.fillRect(0, 0, finalSize, finalSize);
+    squareCtx.fillRect(0, 0, squareSize, squareSize);
 
-    // Add subtle shadow for depth
-    squareCtx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-    squareCtx.shadowBlur = 8;
-    squareCtx.shadowOffsetX = 0;
-    squareCtx.shadowOffsetY = 2;
-
-    // Center the cropped image in the square canvas
+    // Draw image centered
     squareCtx.drawImage(
       canvas,
       bounds.x, bounds.y, bounds.width, bounds.height,
-      (finalSize - bounds.width) / 2,
-      (finalSize - bounds.height) / 2,
-      bounds.width,
-      bounds.height
+      (squareSize - bounds.width) / 2,
+      (squareSize - bounds.height) / 2,
+      bounds.width, bounds.height
     );
 
     return squareCanvas.toDataURL('image/jpeg', 0.95);
@@ -1102,7 +1095,11 @@ export default function App() {
                   {msg.component || <div className="message-text">{msg.text}</div>}
                   {msg.image && (
                     <div className="image-preview" style={{ marginTop: 12 }}>
-                      <img src={URL.createObjectURL(msg.image)} alt="Uploaded" />
+                      <img 
+                        src={msg.thumbnail ? URL.createObjectURL(msg.thumbnail) : URL.createObjectURL(msg.image)} 
+                        alt="Uploaded" 
+                        className="item-image"
+                      />
                     </div>
                   )}
                 </div>
