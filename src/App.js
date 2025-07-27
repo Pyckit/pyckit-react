@@ -647,18 +647,27 @@ async function processItemsLocally(items, imageFile, onProgress) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Calculate crop with generous padding
-            const padding = 1.0;
+            // Calculate crop with reasonable padding
+            const padding = 0.2; // 20% padding instead of 100%
             const centerX = (item.boundingBox.x / 100) * img.width;
             const centerY = (item.boundingBox.y / 100) * img.height;
-            const cropWidth = (item.boundingBox.width / 100) * img.width * (1 + padding);
-            const cropHeight = (item.boundingBox.height / 100) * img.height * (1 + padding);
+            const baseWidth = (item.boundingBox.width / 100) * img.width;
+            const baseHeight = (item.boundingBox.height / 100) * img.height;
             
+            // Add padding to dimensions
+            const cropWidth = baseWidth * (1 + padding);
+            const cropHeight = baseHeight * (1 + padding);
+            
+            // Calculate crop position (ensuring we don't go outside image bounds)
             const cropX = Math.max(0, centerX - cropWidth / 2);
             const cropY = Math.max(0, centerY - cropHeight / 2);
             
-            canvas.width = Math.min(cropWidth, img.width - cropX);
-            canvas.height = Math.min(cropHeight, img.height - cropY);
+            // Ensure we don't exceed image dimensions
+            const finalWidth = Math.min(cropWidth, img.width - cropX);
+            const finalHeight = Math.min(cropHeight, img.height - cropY);
+            
+            canvas.width = finalWidth;
+            canvas.height = finalHeight;
             
             // White background
             ctx.fillStyle = '#ffffff';
@@ -667,8 +676,8 @@ async function processItemsLocally(items, imageFile, onProgress) {
             // Draw cropped area
             ctx.drawImage(
               img,
-              cropX, cropY, canvas.width, canvas.height,
-              0, 0, canvas.width, canvas.height
+              cropX, cropY, finalWidth, finalHeight,
+              0, 0, finalWidth, finalHeight
             );
             
             processedItems.push({
@@ -699,18 +708,27 @@ async function applySegmentationMask(img, maskData, boundingBox) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   
-  // Calculate crop area with padding
-  const padding = 50;
+  // Calculate crop area with smaller padding
+  const padding = 0.2; // 20% padding
   const centerX = (boundingBox.x / 100) * img.width;
   const centerY = (boundingBox.y / 100) * img.height;
-  const width = (boundingBox.width / 100) * img.width + padding * 2;
-  const height = (boundingBox.height / 100) * img.height + padding * 2;
+  const baseWidth = (boundingBox.width / 100) * img.width;
+  const baseHeight = (boundingBox.height / 100) * img.height;
   
+  // Add padding
+  const width = baseWidth * (1 + padding);
+  const height = baseHeight * (1 + padding);
+  
+  // Calculate crop position
   const cropX = Math.max(0, centerX - width / 2);
   const cropY = Math.max(0, centerY - height / 2);
   
-  canvas.width = width;
-  canvas.height = height;
+  // Set canvas size
+  const finalWidth = Math.min(width, img.width - cropX);
+  const finalHeight = Math.min(height, img.height - cropY);
+  
+  canvas.width = finalWidth;
+  canvas.height = finalHeight;
   
   // White background
   ctx.fillStyle = '#ffffff';
@@ -728,13 +746,13 @@ async function applySegmentationMask(img, maskData, boundingBox) {
     // Draw the original image
     ctx.drawImage(
       img,
-      cropX, cropY, width, height,
-      0, 0, width, height
+      cropX, cropY, finalWidth, finalHeight,
+      0, 0, finalWidth, finalHeight
     );
     
     // Apply mask using composite operation
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(maskImg, 0, 0, width, height);
+    ctx.drawImage(maskImg, 0, 0, finalWidth, finalHeight);
     
     // Reset composite operation and add white background
     ctx.globalCompositeOperation = 'destination-over';
@@ -744,8 +762,8 @@ async function applySegmentationMask(img, maskData, boundingBox) {
     // Just crop without mask
     ctx.drawImage(
       img,
-      cropX, cropY, width, height,
-      0, 0, width, height
+      cropX, cropY, finalWidth, finalHeight,
+      0, 0, finalWidth, finalHeight
     );
   }
   
