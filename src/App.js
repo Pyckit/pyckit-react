@@ -666,14 +666,14 @@ async function processItemsLocally(items, imageFile, onProgress) {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
           
-          // Calculate crop area with padding (15% of object size)
-          const padding = 0.15;
+          // Calculate crop area with TIGHTER padding (5% instead of 15%)
+          const padding = 0.05; // Much tighter crop
           const centerX = (item.boundingBox.x / 100) * img.width;
           const centerY = (item.boundingBox.y / 100) * img.height;
           const boxWidth = (item.boundingBox.width / 100) * img.width;
           const boxHeight = (item.boundingBox.height / 100) * img.height;
           
-          // Calculate crop area with padding and bounds checking
+          // Calculate crop area with minimal padding
           const padX = boxWidth * padding;
           const padY = boxHeight * padding;
           
@@ -700,26 +700,37 @@ async function processItemsLocally(items, imageFile, onProgress) {
             continue;
           }
           
-          // Set canvas size
-          canvas.width = cropWidth;
-          canvas.height = cropHeight;
+          // Make canvas square to match your reference (optional)
+          const maxDim = Math.max(cropWidth, cropHeight);
+          canvas.width = maxDim;
+          canvas.height = maxDim;
           
-          // Fill with white background
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, cropWidth, cropHeight);
+          // PURE WHITE BACKGROUND
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           
-          // Draw the cropped portion
+          // Center the cropped image in the square canvas
+          const offsetX = (maxDim - cropWidth) / 2;
+          const offsetY = (maxDim - cropHeight) / 2;
+          
+          // Draw the cropped portion centered
           try {
             ctx.drawImage(
               img,
               cropX, cropY, cropWidth, cropHeight,
-              0, 0, cropWidth, cropHeight
+              offsetX, offsetY, cropWidth, cropHeight
             );
+            
+            // Optional: Add subtle shadow for depth (like your reference)
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 2;
             
             processedItems.push({
               ...item,
-              processedImage: canvas.toDataURL('image/jpeg', 0.9),
-              processed: false,
+              processedImage: canvas.toDataURL('image/jpeg', 0.95),
+              processed: true,
               cropInfo: { cropX, cropY, cropWidth, cropHeight }
             });
             
