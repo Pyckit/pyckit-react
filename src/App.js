@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { SpeedInsights } from "@vercel/speed-insights/react";
-import { removeBackground } from '@imgly/background-removal';
+import { pipeline, env } from '@xenova/transformers';
+
+// Configure transformers to use remote models
+env.allowLocalModels = false;
+env.remoteURL = 'https://huggingface.co/';
 
 // Utility functions
 const API_URL = window.location.hostname === 'localhost' 
@@ -586,113 +590,167 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-// Improved cropping function for individual items
-async function processItemsLocally(items, imageFile, onProgress) {
-  const img = new Image();
+// Helper function to get mask bounds
+function getMaskBounds(mask, width, height) {
+  let minX = width, minY = height, maxX = 0, maxY = 0;
   
-  return new Promise((resolve) => {
-    img.onload = async () => {
-      const processedItems = [];
-      
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        onProgress(i + 1, items.length, item.name);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask[y * width + x] > 0.5) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+// Process items using SAM (Segment Anything Model)
+async function processItemsLocally(items, imageFile, onProgress) {
+  try {
+    // Initialize SAM model
+    console.log('Loading SAM model...');
+    const segmenter = await pipeline('image-segmentation', 'Xenova/sam-vit-base');
+    
+    const img = new Image();
+    
+    return new Promise((resolve) => {
+      img.onload = async () => {
+        const processedItems = [];
         
-        try {
-          // Create canvas for this specific item
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
+        // Create a canvas for the original image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          onProgress(i + 1, items.length, item.name);
           
-          // Convert bounding box percentages to pixels
-          const centerX = (item.boundingBox.x / 100) * img.width;
-          const centerY = (item.boundingBox.y / 100) * img.height;
-          const boxWidth = (item.boundingBox.width / 100) * img.width;
-          const boxHeight = (item.boundingBox.height / 100) * img.height;
-          
-          // Calculate crop area with generous padding (100% extra)
-          const padding = 1.0;
-          const cropWidth = boxWidth * (1 + padding);
-          const cropHeight = boxHeight * (1 + padding);
-          
-          // Calculate top-left corner of crop area
-          const cropX = Math.max(0, centerX - cropWidth / 2);
-          const cropY = Math.max(0, centerY - cropHeight / 2);
-          
-          // Ensure we don't exceed image boundaries
-          const finalWidth = Math.min(cropWidth, img.width - cropX);
-          const finalHeight = Math.min(cropHeight, img.height - cropY);
-          
-          // Set canvas size to the cropped dimensions
-          canvas.width = finalWidth;
-          canvas.height = finalHeight;
-          
-          // Fill with white background
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Draw the cropped portion of the image
-          ctx.drawImage(
-            img,
-            cropX, cropY, finalWidth, finalHeight,  // Source rectangle
-            0, 0, finalWidth, finalHeight           // Destination rectangle
-          );
-          
-          // Try to apply background removal to the cropped image
-          let finalImage;
           try {
-            const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-            const removedBgBlob = await removeBackground(croppedBlob);
+            // Convert bounding box to pixel coordinates
+            const x1 = Math.round((item.boundingBox.x - item.boundingBox.width/2) / 100 * img.width);
+            const y1 = Math.round((item.boundingBox.y - item.boundingBox.height/2) / 100 * img.height);
+            const x2 = Math.round((item.boundingBox.x + item.boundingBox.width/2) / 100 * img.width);
+            const y2 = Math.round((item.boundingBox.y + item.boundingBox.height/2) / 100 * img.height);
             
-            // Create a new canvas for the final image with background removed
-            const finalCanvas = document.createElement('canvas');
-            const finalCtx = finalCanvas.getContext('2d');
-            finalCanvas.width = canvas.width;
-            finalCanvas.height = canvas.height;
-            
-            // White background
-            finalCtx.fillStyle = '#ffffff';
-            finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-            
-            // Draw the background-removed image
-            const bgRemovedImg = new Image();
-            await new Promise((imgResolve) => {
-              bgRemovedImg.onload = () => {
-                finalCtx.drawImage(bgRemovedImg, 0, 0);
-                imgResolve();
-              };
-              bgRemovedImg.src = URL.createObjectURL(removedBgBlob);
+            // Use SAM to segment the object
+            const result = await segmenter(canvas.toDataURL(), {
+              points: [[x1, y1], [x2, y2]],
+              label: [2, 3] // Box coordinates
             });
             
-            finalImage = finalCanvas.toDataURL('image/jpeg', 0.9);
-          } catch (bgError) {
-            console.error('Background removal failed for', item.name, '- using cropped image');
-            // If background removal fails, use the cropped image
-            finalImage = canvas.toDataURL('image/jpeg', 0.9);
+            if (result && result[0]) {
+              // Create a new canvas for the isolated object
+              const outputCanvas = document.createElement('canvas');
+              const outputCtx = outputCanvas.getContext('2d');
+              
+              // Get the mask bounds
+              const mask = result[0].mask;
+              const bounds = getMaskBounds(mask, img.width, img.height);
+              
+              // Set canvas size to object bounds with padding
+              const padding = 50;
+              outputCanvas.width = bounds.width + padding * 2;
+              outputCanvas.height = bounds.height + padding * 2;
+              
+              // Fill with white background
+              outputCtx.fillStyle = '#ffffff';
+              outputCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+              
+              // Apply the mask and draw the object
+              outputCtx.save();
+              outputCtx.beginPath();
+              
+              // Create clipping path from mask
+              for (let y = 0; y < img.height; y++) {
+                for (let x = 0; x < img.width; x++) {
+                  if (mask[y * img.width + x] > 0.5) {
+                    outputCtx.rect(
+                      x - bounds.x + padding, 
+                      y - bounds.y + padding, 
+                      1, 1
+                    );
+                  }
+                }
+              }
+              outputCtx.clip();
+              
+              // Draw the object
+              outputCtx.drawImage(
+                img,
+                bounds.x, bounds.y, bounds.width, bounds.height,
+                padding, padding, bounds.width, bounds.height
+              );
+              outputCtx.restore();
+              
+              processedItems.push({
+                ...item,
+                processedImage: outputCanvas.toDataURL('image/jpeg', 0.95),
+                processed: true
+              });
+            } else {
+              throw new Error('SAM segmentation failed');
+            }
+            
+          } catch (error) {
+            console.error(`Failed to process ${item.name} with SAM:`, error);
+            // Fallback to simple cropping
+            const fallbackCanvas = document.createElement('canvas');
+            const fallbackCtx = fallbackCanvas.getContext('2d');
+            
+            const padding = 100;
+            const centerX = (item.boundingBox.x / 100) * img.width;
+            const centerY = (item.boundingBox.y / 100) * img.height;
+            const width = (item.boundingBox.width / 100) * img.width + padding * 2;
+            const height = (item.boundingBox.height / 100) * img.height + padding * 2;
+            
+            fallbackCanvas.width = width;
+            fallbackCanvas.height = height;
+            
+            fallbackCtx.fillStyle = '#ffffff';
+            fallbackCtx.fillRect(0, 0, width, height);
+            
+            fallbackCtx.drawImage(
+              img,
+              centerX - width/2, centerY - height/2, width, height,
+              0, 0, width, height
+            );
+            
+            processedItems.push({
+              ...item,
+              processedImage: fallbackCanvas.toDataURL('image/jpeg', 0.95),
+              processed: false,
+              error: error.message
+            });
           }
-          
-          processedItems.push({
-            ...item,
-            processedImage: finalImage,
-            processed: true
-          });
-          
-        } catch (error) {
-          console.error(`Failed to process ${item.name}:`, error);
-          // If processing fails, use the original image
-          processedItems.push({
-            ...item,
-            processedImage: URL.createObjectURL(imageFile),
-            processed: false,
-            error: error.message
-          });
         }
-      }
+        
+        resolve(processedItems);
+      };
       
-      resolve(processedItems);
-    };
+      img.src = URL.createObjectURL(imageFile);
+    });
     
-    img.src = URL.createObjectURL(imageFile);
-  });
+  } catch (error) {
+    console.error('Failed to initialize SAM:', error);
+    // Return items without processing
+    return items.map(item => ({
+      ...item,
+      processed: false,
+      error: error.message
+    }));
+  }
 }
 
 // Main App Component
