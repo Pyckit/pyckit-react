@@ -747,7 +747,6 @@ async function applySegmentationMask(img, maskData, boundingBox) {
   
   return canvas.toDataURL('image/jpeg', 0.95);
 }
-}
 
 // Main App Component
 export default function App() {
