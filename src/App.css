@@ -516,4 +516,154 @@ body {
   .error-modal {
     margin: 20px;
   }
+  
+  .quality-tiers {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .tier {
+    width: 100%;
+  }
+}
+
+/* Quality Info on Welcome Screen */
+.quality-info {
+  margin-top: 60px;
+  text-align: center;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.quality-info h3 {
+  font-size: 20px;
+  margin-bottom: 24px;
+  color: var(--text-primary);
+}
+
+.quality-tiers {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  margin-top: 32px;
+}
+
+.tier {
+  flex: 1;
+  padding: 24px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tier:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+.tier-icon {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 12px;
+  color: var(--primary-gold);
+}
+
+.tier strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.tier p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Enhancement Banner */
+.enhancement-banner {
+  background: linear-gradient(135deg, #E6BD70 0%, #D4A85A 100%);
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  margin: 24px 0;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.enhancement-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-weight: 500;
+}
+
+.enhancement-content svg {
+  flex-shrink: 0;
+}
+
+/* Processing Indicator on Cards */
+.processing-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 20px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  backdrop-filter: blur(4px);
+}
+
+/* Small Spinner */
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid var(--primary-gold);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Enhanced image transition */
+.detailed-item-image {
+  transition: all 0.3s ease;
+}
+
+/* Success indicator */
+.item-card.enhanced .item-badge {
+  background-color: var(--green-accent);
+  color: white;
+}
+
+/* Responsive adjustments for enhancement banner */
+@media (max-width: 480px) {
+  .enhancement-content {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .quality-tiers {
+    flex-direction: column;
+  }
+  
+  .tier {
+    width: 100%;
+    margin-bottom: 16px;
+  }
+  
+  .tier:last-child {
+    margin-bottom: 0;
+  }
 }

@@ -7,7 +7,64 @@ const API_URL = window.location.hostname === 'localhost'
   ? 'http://localhost:3001'
   : '/api';
 
-const API_KEY_STORAGE = 'pyckit_api_key';
+// Client-side isolation function
+async function createBasicIsolation(img, boundingBox) {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Calculate crop area
+    const { x, y, width, height } = boundingBox;
+    const padding = 1.3;
+    const imgW = img.width;
+    const imgH = img.height;
+    
+    const boxW = (width / 100 * imgW) * padding;
+    const boxH = (height / 100 * imgH) * padding;
+    const cropX = Math.max(0, (x / 100 * imgW) - boxW / 2);
+    const cropY = Math.max(0, (y / 100 * imgH) - boxH / 2);
+    
+    // Make square canvas
+    const size = Math.max(boxW, boxH);
+    canvas.width = size;
+    canvas.height = size;
+    
+    // White background
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, size, size);
+    
+    // Center the crop
+    const offsetX = (size - boxW) / 2;
+    const offsetY = (size - boxH) / 2;
+    
+    // Draw image
+    ctx.drawImage(
+      img,
+      cropX, cropY, boxW, boxH,
+      offsetX, offsetY, boxW, boxH
+    );
+    
+    // Apply vignette/fade effect for soft edges
+    const gradient = ctx.createRadialGradient(
+      size/2, size/2, size * 0.3,
+      size/2, size/2, size * 0.5
+    );
+    gradient.addColorStop(0, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.7, 'rgba(255,255,255,0)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0.8)');
+    
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    
+    // Add back white background
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, size, size);
+    
+    resolve(canvas.toDataURL('image/jpeg', 0.95));
+  });
+}
 
 // Components
 const WelcomeScreen = ({ onFileSelect }) => {
@@ -24,6 +81,22 @@ const WelcomeScreen = ({ onFileSelect }) => {
         + Upload a photo
       </button>
       
+      <div className="quality-info">
+        <h3>How it works:</h3>
+        <div className="quality-tiers">
+          <div className="tier">
+            <span className="tier-icon">⚡</span>
+            <strong>Instant Results</strong>
+            <p>Basic isolation available immediately</p>
+          </div>
+          <div className="tier">
+            <span className="tier-icon">✨</span>
+            <strong>Enhanced Quality</strong>
+            <p>Professional isolation in 2-5 minutes</p>
+          </div>
+        </div>
+      </div>
+      
       <input
         ref={fileInputRef}
         type="file"
@@ -36,12 +109,20 @@ const WelcomeScreen = ({ onFileSelect }) => {
 };
 
 const ItemCard = ({ item, onViewListing }) => {
+  const [enhancedImage, setEnhancedImage] = useState(null);
+  
   return (
     <div className="detailed-item-card">
       <div className="item-badge"></div>
+      {item.processingStatus === 'queued' && !enhancedImage && (
+        <div className="processing-indicator">
+          <div className="spinner-small" />
+          <span>Enhancing...</span>
+        </div>
+      )}
       <div className="item-image-wrapper">
         <img 
-          src={item.processedImage || item.stagedImage} 
+          src={enhancedImage || item.processedImage} 
           alt={item.name}
           className="detailed-item-image"
         />
@@ -68,13 +149,74 @@ const ItemCard = ({ item, onViewListing }) => {
   );
 };
 
-const ImageAnalysis = ({ analysisData, imageFile }) => {
+const ImageAnalysis = ({ analysisData, imageFile, queueId }) => {
+  const [items, setItems] = useState(analysisData.items);
   const [showAllItems, setShowAllItems] = useState(false);
-  const visibleItems = showAllItems ? analysisData.items : analysisData.items.slice(0, 3);
+  const [enhancementStatus, setEnhancementStatus] = useState('processing');
+  const checkIntervalRef = useRef(null);
+  
+  const visibleItems = showAllItems ? items : items.slice(0, 3);
+  
+  // Poll for enhanced images
+  useEffect(() => {
+    if (!queueId) return;
+    
+    const checkStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/check-status?queueId=${queueId}`);
+        const data = await response.json();
+        
+        if (data.success && data.processedItems) {
+          // Update items with enhanced masks
+          const updatedItems = items.map(item => {
+            const processed = data.processedItems.find(p => p.itemId === item.id);
+            if (processed && processed.mask) {
+              return {
+                ...item,
+                enhancedMask: processed.mask,
+                cropCoords: processed.cropCoords,
+                processingStatus: 'enhanced'
+              };
+            }
+            return item;
+          });
+          
+          setItems(updatedItems);
+          
+          // Apply enhanced isolation
+          updatedItems.forEach(async (item) => {
+            if (item.enhancedMask && !item.enhancedImage) {
+              const enhanced = await applyEnhancedMask(imageFile, item.enhancedMask, item.cropCoords);
+              setItems(prev => prev.map(i => 
+                i.id === item.id ? { ...i, enhancedImage: enhanced } : i
+              ));
+            }
+          });
+          
+          // Stop polling if complete
+          if (data.status === 'completed') {
+            setEnhancementStatus('completed');
+            clearInterval(checkIntervalRef.current);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check status:', error);
+      }
+    };
+    
+    // Check immediately, then every 5 seconds
+    checkStatus();
+    checkIntervalRef.current = setInterval(checkStatus, 5000);
+    
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
+    };
+  }, [queueId, items, imageFile]);
   
   const handleViewListing = (item) => {
     console.log('View listing for:', item.name);
-    // Add your listing logic here
   };
   
   return (
@@ -93,6 +235,16 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         </div>
       </div>
       
+      {/* Enhancement Status */}
+      {queueId && enhancementStatus === 'processing' && (
+        <div className="enhancement-banner">
+          <div className="enhancement-content">
+            <div className="spinner-small" />
+            <span>Enhancing images with professional isolation...</span>
+          </div>
+        </div>
+      )}
+      
       {/* Total Value Card */}
       <div className="value-summary-card">
         <h3>Total estimated value</h3>
@@ -103,7 +255,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       
       {/* List All Items Button */}
       <button className="list-all-button">
-        List all items ({analysisData.items.length})
+        List all items ({items.length})
       </button>
       
       {/* Sellable Items Section */}
@@ -115,14 +267,14 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
         <div className="detailed-items-grid">
           {visibleItems.map((item, index) => (
             <ItemCard 
-              key={index} 
+              key={item.id || index} 
               item={item} 
               onViewListing={handleViewListing}
             />
           ))}
         </div>
         
-        {!showAllItems && analysisData.items.length > 3 && (
+        {!showAllItems && items.length > 3 && (
           <div className="load-more-section">
             <div className="separator-line">
               <span className="separator-text">
@@ -142,51 +294,27 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   );
 };
 
-const ErrorModal = ({ error, onClose }) => {
-  return (
-    <div className="error-overlay">
-      <div className="error-modal">
-        <div className="error-icon">⚠️</div>
-        <h2>Critical Error</h2>
-        <p className="error-message">{error}</p>
-        <button className="error-close-btn" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    </div>
-  );
-};
-
-// STRICT SAM segmentation - NO FALLBACKS
-async function applySegmentationMask(img, maskData, cropCoords) {
-  return new Promise((resolve, reject) => {
-    if (!maskData || !cropCoords) {
-      reject(new Error('Missing mask data or crop coordinates'));
-      return;
-    }
-    
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    
+// Apply enhanced mask when available
+async function applyEnhancedMask(imageFile, maskData, cropCoords) {
+  return new Promise((resolve) => {
+    const img = new Image();
     const maskImg = new Image();
     
-    maskImg.onload = () => {
-      try {
+    img.onload = () => {
+      maskImg.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
         const { x1, y1, x2, y2 } = cropCoords;
         const cropWidth = x2 - x1;
         const cropHeight = y2 - y1;
         
-        // Validate dimensions
-        if (cropWidth <= 0 || cropHeight <= 0) {
-          throw new Error(`Invalid crop dimensions: ${cropWidth}x${cropHeight}`);
-        }
-        
-        // Create square canvas
+        // Square canvas
         const size = Math.max(cropWidth, cropHeight) * 1.2;
         canvas.width = size;
         canvas.height = size;
         
-        // Pure white background
+        // White background
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, size, size);
         
@@ -194,82 +322,50 @@ async function applySegmentationMask(img, maskData, cropCoords) {
         const offsetX = (size - cropWidth) / 2;
         const offsetY = (size - cropHeight) / 2;
         
-        // Draw the cropped area
+        // Draw cropped area
         ctx.drawImage(
           img,
           x1, y1, cropWidth, cropHeight,
           offsetX, offsetY, cropWidth, cropHeight
         );
         
-        // Create a temporary canvas for the mask
+        // Apply mask
         const maskCanvas = document.createElement('canvas');
         const maskCtx = maskCanvas.getContext('2d');
         maskCanvas.width = cropWidth;
         maskCanvas.height = cropHeight;
         maskCtx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
         
-        // Apply the mask
         ctx.globalCompositeOperation = 'destination-in';
         ctx.drawImage(maskCanvas, offsetX, offsetY);
         
-        // Ensure white background
         ctx.globalCompositeOperation = 'destination-over';
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, size, size);
         
-        const result = canvas.toDataURL('image/jpeg', 0.95);
-        resolve(result);
-      } catch (error) {
-        reject(new Error(`Mask application failed: ${error.message}`));
-      }
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      };
+      maskImg.src = maskData;
     };
-    
-    maskImg.onerror = () => {
-      reject(new Error('Failed to load mask image data'));
-    };
-    
-    maskImg.src = maskData;
+    img.src = URL.createObjectURL(imageFile);
   });
 }
 
-// STRICT processing - NO FALLBACKS
-async function processItemsLocally(items, imageFile, imageDimensions, onProgress) {
+// Process items with basic isolation first
+async function processItemsLocally(items, imageFile, onProgress) {
   const img = new Image();
   
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     img.onload = async () => {
       const processedItems = [];
-      const errors = [];
       
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         onProgress(i + 1, items.length, item.name);
         
         try {
-          // STRICT REQUIREMENT: Must have SAM segmentation
-          if (!item.hasSegmentation) {
-            throw new Error(`No SAM segmentation flag for ${item.name}`);
-          }
-          
-          if (!item.segmentationMask) {
-            throw new Error(`No segmentation mask data for ${item.name}`);
-          }
-          
-          if (!item.cropCoords) {
-            throw new Error(`No crop coordinates for ${item.name}`);
-          }
-          
-          console.log(`Processing ${item.name} with SAM segmentation...`);
-          
-          const processedImage = await applySegmentationMask(
-            img,
-            item.segmentationMask,
-            item.cropCoords
-          );
-          
-          if (!processedImage) {
-            throw new Error(`SAM processing returned null for ${item.name}`);
-          }
+          // Create basic isolation immediately
+          const processedImage = await createBasicIsolation(img, item.boundingBox);
           
           processedItems.push({
             ...item,
@@ -277,26 +373,17 @@ async function processItemsLocally(items, imageFile, imageDimensions, onProgress
             processed: true
           });
           
-          console.log(`✓ Successfully processed ${item.name}`);
-          
         } catch (error) {
-          console.error(`CRITICAL ERROR processing ${item.name}:`, error);
-          errors.push(`${item.name}: ${error.message}`);
+          console.error(`Failed to process ${item.name}:`, error);
+          processedItems.push({
+            ...item,
+            processedImage: URL.createObjectURL(imageFile),
+            processed: false
+          });
         }
       }
       
-      // If ANY errors occurred, fail the entire batch
-      if (errors.length > 0) {
-        reject(new Error(`SAM processing failed for ${errors.length} items:\n\n${errors.join('\n')}`));
-        return;
-      }
-      
       resolve(processedItems);
-    };
-    
-    img.onerror = (error) => {
-      console.error('Failed to load image:', error);
-      reject(new Error('Failed to load source image for processing'));
     };
     
     img.src = URL.createObjectURL(imageFile);
@@ -309,7 +396,7 @@ export default function App() {
   const [currentImage, setCurrentImage] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState(null);
-  const [error, setError] = useState(null);
+  const [queueId, setQueueId] = useState(null);
   
   const handleFileSelect = async (event) => {
     const file = event.target.files[0];
@@ -321,7 +408,6 @@ export default function App() {
   
   const analyzeImage = async (imageFile) => {
     setIsLoading(true);
-    setError(null);
     
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -330,54 +416,37 @@ export default function App() {
       try {
         const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
         
-        console.log('Sending image for analysis...');
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image: base64,
-            roomType: 'unknown'
+            roomType: 'unknown',
+            userId: localStorage.getItem('pyckit_user_id') || 'anonymous',
+            userTier: 'free' // Change based on user subscription
           })
         });
         
         if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Server error (${response.status}): ${errorText}`);
+          throw new Error(`Server error: ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('Received analysis data:', data);
         
-        if (!data.success) {
-          throw new Error(data.error || 'Analysis failed');
-        }
-        
-        // STRICT VALIDATION: Ensure ALL items have SAM segmentation
-        if (!data.items || !Array.isArray(data.items)) {
-          throw new Error('Invalid response: missing items array');
-        }
-        
-        const itemsWithoutSegmentation = data.items.filter(item => !item.hasSegmentation);
-        if (itemsWithoutSegmentation.length > 0) {
-          const names = itemsWithoutSegmentation.map(i => i.name).join(', ');
-          throw new Error(`Backend failed to provide SAM segmentation for ${itemsWithoutSegmentation.length} items: ${names}`);
-        }
-        
-        console.log(`All ${data.items.length} items have SAM segmentation. Processing...`);
-        setProcessingStatus({ current: 0, total: data.items.length });
-        
-        try {
+        if (data.success) {
+          setQueueId(data.queueId);
+          setProcessingStatus({ current: 0, total: data.items.length });
+          
+          // Process with basic isolation first
           const processedItems = await processItemsLocally(
             data.items,
             imageFile,
-            data.imageDimensions,
             (current, total, itemName) => {
               setProcessingStatus({ current, total, currentItem: itemName });
             }
           );
           
           setProcessingStatus(null);
-          console.log('Successfully processed all items!');
           
           setAnalysisResult({
             ...data,
@@ -385,24 +454,15 @@ export default function App() {
             imageFile
           });
           
-        } catch (processingError) {
-          // Processing failed - this is critical
-          console.error('CRITICAL: Item processing failed', processingError);
-          setProcessingStatus(null);
-          setError(processingError.message);
+        } else {
+          throw new Error(data.error || 'Analysis failed');
         }
-        
       } catch (error) {
         console.error('Analysis error:', error);
         setProcessingStatus(null);
-        setError(error.message);
+        alert(`Error: ${error.message}`);
       }
       
-      setIsLoading(false);
-    };
-    
-    reader.onerror = () => {
-      setError('Failed to read image file');
       setIsLoading(false);
     };
     
@@ -414,13 +474,17 @@ export default function App() {
       {!analysisResult ? (
         <WelcomeScreen onFileSelect={handleFileSelect} />
       ) : (
-        <ImageAnalysis analysisData={analysisResult} imageFile={currentImage} />
+        <ImageAnalysis 
+          analysisData={analysisResult} 
+          imageFile={currentImage}
+          queueId={queueId}
+        />
       )}
       
       {processingStatus && (
         <div className="processing-overlay">
           <div className="processing-modal">
-            <h3>Processing Items...</h3>
+            <h3>Creating Basic Isolation...</h3>
             <div className="progress-bar">
               <div 
                 className="progress-fill" 
@@ -439,17 +503,6 @@ export default function App() {
         <div className="loading-overlay">
           <div className="loading-spinner" />
         </div>
-      )}
-      
-      {error && (
-        <ErrorModal 
-          error={error} 
-          onClose={() => {
-            setError(null);
-            setAnalysisResult(null);
-            setCurrentImage(null);
-          }} 
-        />
       )}
       
       <SpeedInsights />
