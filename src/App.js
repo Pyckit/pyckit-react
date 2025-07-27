@@ -649,7 +649,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
                 processedItems.push({
                   ...item,
                   processedImage: isolatedImage,
-                  processed: true  // FIXED: Mark as processed for segmented items
+                  processed: true
                 });
                 continue;
               }
@@ -704,7 +704,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
           canvas.width = cropWidth;
           canvas.height = cropHeight;
           
-          // ENSURE CLEAN WHITE BACKGROUND FIRST
+          // Fill with white background
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, cropWidth, cropHeight);
           
@@ -718,8 +718,8 @@ async function processItemsLocally(items, imageFile, onProgress) {
             
             processedItems.push({
               ...item,
-              processedImage: canvas.toDataURL('image/jpeg', 0.95),
-              processed: true,  // FIXED: Mark as processed even without segmentation
+              processedImage: canvas.toDataURL('image/jpeg', 0.9),
+              processed: false,
               cropInfo: { cropX, cropY, cropWidth, cropHeight }
             });
             
@@ -809,7 +809,7 @@ async function applySegmentationMask(img, maskData, boundingBox) {
     canvas.width = cropWidth;
     canvas.height = cropHeight;
     
-    // ENSURE CLEAN WHITE BACKGROUND FIRST
+    // Fill with white background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, cropWidth, cropHeight);
     
@@ -825,31 +825,27 @@ async function applySegmentationMask(img, maskData, boundingBox) {
         maskImg.src = maskData;
         await maskLoadPromise;
         
-        // Create temporary canvas for masked content
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCanvas.width = cropWidth;
-        tempCanvas.height = cropHeight;
-        
-        // Draw the original image to temp canvas
-        tempCtx.drawImage(
+        // Draw the original image
+        ctx.drawImage(
           img,
           cropX, cropY, cropWidth, cropHeight,
           0, 0, cropWidth, cropHeight
         );
         
-        // Apply mask using composite operation
-        tempCtx.globalCompositeOperation = 'destination-in';
-        tempCtx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
+        // Apply mask
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
         
-        // Now draw the masked content onto the white background
-        ctx.drawImage(tempCanvas, 0, 0);
+        // Reset composite operation and ensure white background
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cropWidth, cropHeight);
         
         console.log('Successfully applied segmentation mask');
         
       } catch (maskError) {
         console.error('Error applying mask, falling back to simple crop:', maskError);
-        // Fall back to simple crop on white background
+        // Fall back to simple crop
         ctx.drawImage(
           img,
           cropX, cropY, cropWidth, cropHeight,
@@ -857,7 +853,7 @@ async function applySegmentationMask(img, maskData, boundingBox) {
         );
       }
     } else {
-      // No mask data, just crop the image on white background
+      // No mask data, just crop the image
       ctx.drawImage(
         img,
         cropX, cropY, cropWidth, cropHeight,
@@ -932,6 +928,23 @@ export default function App() {
           
           const data = await response.json();
           console.log('Backend response:', data);
+          
+          // ADD THIS DEBUG CODE TEMPORARILY
+          console.log('=== BACKEND DEBUG ===');
+          console.log('Success:', data.success);
+          console.log('Total Value:', data.totalValue);
+          console.log('Number of items:', data.items ? data.items.length : 'NO ITEMS');
+          
+          if (data.items && data.items.length > 0) {
+            console.log('First item structure:');
+            console.log(JSON.stringify(data.items[0], null, 2));
+            
+            // Check for segmentation data
+            const itemsWithSegmentation = data.items.filter(item => item.hasSegmentation);
+            console.log(`Items with segmentation: ${itemsWithSegmentation.length}/${data.items.length}`);
+          }
+          console.log('=== END DEBUG ===');
+          // END OF DEBUG CODE
           
           if (data.success) {
             // Validate items array
