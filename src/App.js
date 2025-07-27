@@ -47,7 +47,7 @@ const WelcomeScreen = ({ onFileSelect }) => {
         <ol style={{ color: '#92400E', marginLeft: 20, lineHeight: 1.8 }}>
           <li>Take a clear photo of any room in your house</li>
           <li>Our AI identifies all sellable items automatically</li>
-          <li>Background removal happens instantly in your browser (FREE!)</li>
+          <li>Professional object isolation with SAM technology</li>
           <li>Get Calgary market prices and descriptions</li>
         </ol>
       </div>
@@ -82,7 +82,7 @@ const ApiKeyPrompt = ({ onSave }) => {
         To use Pyckit, you'll need a Claude API key from Anthropic.
       </p>
       <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20, fontStyle: 'italic' }}>
-        ✨ Good news: Background removal is now FREE and runs in your browser!
+        ✨ Good news: Professional object isolation with SAM technology!
       </p>
       <input
         type="password"
@@ -631,7 +631,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
               processed: true
             });
           } else {
-            // Fallback to simple cropping with background removal
+            // Fallback to simple cropping
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
@@ -659,41 +659,11 @@ async function processItemsLocally(items, imageFile, onProgress) {
               0, 0, canvas.width, canvas.height
             );
             
-            // Try background removal
-            try {
-              const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-              const removedBgBlob = await removeBackground(blob);
-              
-              const finalCanvas = document.createElement('canvas');
-              const finalCtx = finalCanvas.getContext('2d');
-              finalCanvas.width = canvas.width;
-              finalCanvas.height = canvas.height;
-              
-              finalCtx.fillStyle = '#ffffff';
-              finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-              
-              const removedImg = new Image();
-              await new Promise((imgResolve) => {
-                removedImg.onload = () => {
-                  finalCtx.drawImage(removedImg, 0, 0);
-                  imgResolve();
-                };
-                removedImg.src = URL.createObjectURL(removedBgBlob);
-              });
-              
-              processedItems.push({
-                ...item,
-                processedImage: finalCanvas.toDataURL('image/jpeg', 0.95),
-                processed: true
-              });
-            } catch (bgError) {
-              // If background removal fails, use cropped image
-              processedItems.push({
-                ...item,
-                processedImage: canvas.toDataURL('image/jpeg', 0.95),
-                processed: false
-              });
-            }
+            processedItems.push({
+              ...item,
+              processedImage: canvas.toDataURL('image/jpeg', 0.95),
+              processed: false
+            });
           }
         } catch (error) {
           console.error(`Failed to process ${item.name}:`, error);
@@ -735,9 +705,31 @@ async function applySegmentationMask(img, maskData, boundingBox) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
   // If we have mask data, apply it
-  if (maskData) {
-    // This is where we'd apply the actual mask
-    // For now, just crop the area
+  if (maskData && typeof maskData === 'string') {
+    // Create mask image
+    const maskImg = new Image();
+    await new Promise((resolve) => {
+      maskImg.onload = resolve;
+      maskImg.src = maskData;
+    });
+    
+    // Draw the original image
+    ctx.drawImage(
+      img,
+      cropX, cropY, width, height,
+      0, 0, width, height
+    );
+    
+    // Apply mask using composite operation
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(maskImg, 0, 0, width, height);
+    
+    // Reset composite operation and add white background
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    // Just crop without mask
     ctx.drawImage(
       img,
       cropX, cropY, width, height,
