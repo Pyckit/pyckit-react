@@ -916,121 +916,156 @@ export default function App() {
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
     if (file && file.type.startsWith('image/')) {
+      console.log('Selected file:', file.name, file.size, file.type);
       setSelectedImage(file);
+      
+      // Create a preview URL for debugging
+      const previewUrl = URL.createObjectURL(file);
+      console.log('Preview URL:', previewUrl);
+      
+      // Load the image to check dimensions
+      const img = new Image();
+      img.onload = () => {
+        console.log('Image dimensions:', img.width, 'x', img.height);
+      };
+      img.onerror = () => console.error('Failed to load image');
+      img.src = previewUrl;
+      
       sendMessage('Analyze this room for sellable items', file);
     }
   };
   
   const sendMessage = async (text, imageFile) => {
+    console.log('Starting message send with image:', imageFile?.name);
     const apiKey = localStorage.getItem(API_KEY_STORAGE);
     if (!apiKey) {
+      console.error('No API key found');
       setHasApiKey(false);
       return;
     }
     
-    setMessages([...messages, { role: 'user', text, image: imageFile }]);
+    setMessages(prev => [...prev, { role: 'user', text, image: imageFile }]);
     setIsLoading(true);
     
-    if (imageFile) {
+    const processImage = async () => {
+      if (!imageFile) {
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('Processing image file:', imageFile.name, imageFile.size, imageFile.type);
       const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64 = e.target.result.split(',')[1];
+      
+      try {
+        // First, try to load and validate the image
+        const imageLoadPromise = new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = (e) => reject(new Error('Failed to load image'));
+          img.src = URL.createObjectURL(imageFile);
+        });
         
-        try {
-          // Step 1: Get AI detection
-          const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
-          console.log('Sending request to:', endpoint);
-          
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image: base64,
-              roomType: 'unknown'
-            })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Server error: ${response.status} - ${errorText}`);
-          }
-          
-          const data = await response.json();
-          console.log('Backend response:', data);
-          
-          // ADD THIS DEBUG CODE TEMPORARILY
-          console.log('=== BACKEND DEBUG ===');
-          console.log('Success:', data.success);
-          console.log('Total Value:', data.totalValue);
-          console.log('Number of items:', data.items ? data.items.length : 'NO ITEMS');
-          
-          if (data.items && data.items.length > 0) {
-            console.log('First item structure:');
-            console.log(JSON.stringify(data.items[0], null, 2));
-            
-            // Check for segmentation data
-            const itemsWithSegmentation = data.items.filter(item => item.hasSegmentation);
-            console.log(`Items with segmentation: ${itemsWithSegmentation.length}/${data.items.length}`);
-          }
-          console.log('=== END DEBUG ===');
-          // END OF DEBUG CODE
-          
-          if (data.success) {
-            // Validate items array
-            if (!data.items || !Array.isArray(data.items)) {
-              throw new Error('Invalid response: missing items array');
-            }
-            
-            // Step 2: Process items with individual cropping and background removal
-            console.log('Processing items individually...');
-            console.log('Items from backend:', data.items);
-            setProcessingStatus({ current: 0, total: data.items.length });
-            
-            const processedItems = await processItemsLocally(
-              data.items, 
-              imageFile,
-              (current, total, itemName) => {
-                setProcessingStatus({ current, total, currentItem: itemName });
-              }
-            );
-            
-            setProcessingStatus(null);
-            
-            const analysisData = {
-              ...data,
-              items: processedItems,
-              imageFile
-            };
-            
-            setMessages(prev => [...prev, { 
-              role: 'assistant', 
-              component: <ImageAnalysis analysisData={analysisData} imageFile={imageFile} />
-            }]);
-          } else {
-            throw new Error(data.error || 'Analysis failed');
-          }
-        } catch (error) {
-          console.error('Full error details:', error);
-          setProcessingStatus(null);
-          
-          // Better error handling for common issues
-          let errorMessage = error.message;
-          if (error.message.includes('overloaded_error') || error.message.includes('529')) {
-            errorMessage = 'The AI service is currently overloaded. Please try again in a few moments.';
-          } else if (error.message.includes('401')) {
-            errorMessage = 'Authentication failed. Please check your API key.';
-          }
-          
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            text: `Error: ${errorMessage}` 
-          }]);
+        const img = await imageLoadPromise;
+        console.log('Image loaded successfully:', img.width, 'x', img.height);
+        
+        // Read the file as base64
+        const base64 = await new Promise((resolve, reject) => {
+          reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+          reader.onerror = (e) => reject(new Error('Failed to read image data'));
+          reader.readAsDataURL(imageFile);
+        });
+        
+        if (!base64) {
+          throw new Error('Failed to convert image to base64');
         }
         
+        // Make API call
+        const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
+        console.log('Sending request to:', endpoint);
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64,
+            roomType: 'unknown'
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Server error: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log('Backend response:', data);
+        
+        if (!data.success) {
+          throw new Error(data.error || 'Analysis failed');
+        }
+        
+        // Validate items array
+        if (!data.items || !Array.isArray(data.items)) {
+          throw new Error('Invalid response: missing items array');
+        }
+        
+        // Process items with individual cropping and background removal
+        console.log('Processing items individually...');
+        setProcessingStatus({ current: 0, total: data.items.length });
+        
+        const processedItems = await processItemsLocally(
+          data.items, 
+          imageFile,
+          (current, total, itemName) => {
+            setProcessingStatus({ current, total, currentItem: itemName });
+          }
+        );
+        
+        setProcessingStatus(null);
+        
+        const analysisData = {
+          ...data,
+          items: processedItems,
+          imageFile
+        };
+        
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          component: <ImageAnalysis analysisData={analysisData} imageFile={imageFile} />
+        }]);
+        
+      } catch (error) {
+        console.error('Error processing image:', error);
+        setProcessingStatus(null);
+        
+        let errorMessage = 'An error occurred while processing the image.';
+        if (error.message.includes('overloaded') || error.message.includes('529')) {
+          errorMessage = 'The AI service is currently overloaded. Please try again in a few moments.';
+        } else if (error.message.includes('401')) {
+          errorMessage = 'Authentication failed. Please check your API key.';
+        } else if (error.message.includes('Failed to load image')) {
+          errorMessage = 'The image could not be loaded. It may be corrupted or in an unsupported format.';
+        } else if (error.message.includes('network')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        }
+        
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          text: `Error: ${errorMessage}` 
+        }]);
+      } finally {
         setIsLoading(false);
-      };
-      reader.readAsDataURL(imageFile);
-    }
+      }
+    };
+    
+    // Start processing
+    processImage().catch(error => {
+      console.error('Unhandled error in processImage:', error);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        text: 'An unexpected error occurred. Please try again.' 
+      }]);
+    });
     
     setInputText('');
     setSelectedImage(null);
