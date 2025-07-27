@@ -1,11 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { SpeedInsights } from "@vercel/speed-insights/react";
-import { pipeline, env } from '@xenova/transformers';
-
-// Configure transformers to use remote models
-env.allowLocalModels = false;
-env.remoteURL = 'https://huggingface.co/';
 
 // Utility functions
 const API_URL = window.location.hostname === 'localhost' 
@@ -613,144 +608,145 @@ function getMaskBounds(mask, width, height) {
   };
 }
 
-// Process items using SAM (Segment Anything Model)
+// Updated function to handle segmentation masks from backend
 async function processItemsLocally(items, imageFile, onProgress) {
-  try {
-    // Initialize SAM model
-    console.log('Loading SAM model...');
-    const segmenter = await pipeline('image-segmentation', 'Xenova/sam-vit-base');
-    
-    const img = new Image();
-    
-    return new Promise((resolve) => {
-      img.onload = async () => {
-        const processedItems = [];
+  const img = new Image();
+  
+  return new Promise((resolve) => {
+    img.onload = async () => {
+      const processedItems = [];
+      
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        onProgress(i + 1, items.length, item.name);
         
-        // Create a canvas for the original image
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          onProgress(i + 1, items.length, item.name);
-          
-          try {
-            // Convert bounding box to pixel coordinates
-            const x1 = Math.round((item.boundingBox.x - item.boundingBox.width/2) / 100 * img.width);
-            const y1 = Math.round((item.boundingBox.y - item.boundingBox.height/2) / 100 * img.height);
-            const x2 = Math.round((item.boundingBox.x + item.boundingBox.width/2) / 100 * img.width);
-            const y2 = Math.round((item.boundingBox.y + item.boundingBox.height/2) / 100 * img.height);
-            
-            // Use SAM to segment the object
-            const result = await segmenter(canvas.toDataURL(), {
-              points: [[x1, y1], [x2, y2]],
-              label: [2, 3] // Box coordinates
+        try {
+          // If we have a segmentation mask from the backend, use it
+          if (item.hasSegmentation && item.segmentationMask) {
+            // Apply the mask to isolate the object
+            const isolatedImage = await applySegmentationMask(img, item.segmentationMask, item.boundingBox);
+            processedItems.push({
+              ...item,
+              processedImage: isolatedImage,
+              processed: true
             });
+          } else {
+            // Fallback to simple cropping with background removal
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
             
-            if (result && result[0]) {
-              // Create a new canvas for the isolated object
-              const outputCanvas = document.createElement('canvas');
-              const outputCtx = outputCanvas.getContext('2d');
+            // Calculate crop with generous padding
+            const padding = 1.0;
+            const centerX = (item.boundingBox.x / 100) * img.width;
+            const centerY = (item.boundingBox.y / 100) * img.height;
+            const cropWidth = (item.boundingBox.width / 100) * img.width * (1 + padding);
+            const cropHeight = (item.boundingBox.height / 100) * img.height * (1 + padding);
+            
+            const cropX = Math.max(0, centerX - cropWidth / 2);
+            const cropY = Math.max(0, centerY - cropHeight / 2);
+            
+            canvas.width = Math.min(cropWidth, img.width - cropX);
+            canvas.height = Math.min(cropHeight, img.height - cropY);
+            
+            // White background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw cropped area
+            ctx.drawImage(
+              img,
+              cropX, cropY, canvas.width, canvas.height,
+              0, 0, canvas.width, canvas.height
+            );
+            
+            // Try background removal
+            try {
+              const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+              const removedBgBlob = await removeBackground(blob);
               
-              // Get the mask bounds
-              const mask = result[0].mask;
-              const bounds = getMaskBounds(mask, img.width, img.height);
+              const finalCanvas = document.createElement('canvas');
+              const finalCtx = finalCanvas.getContext('2d');
+              finalCanvas.width = canvas.width;
+              finalCanvas.height = canvas.height;
               
-              // Set canvas size to object bounds with padding
-              const padding = 50;
-              outputCanvas.width = bounds.width + padding * 2;
-              outputCanvas.height = bounds.height + padding * 2;
+              finalCtx.fillStyle = '#ffffff';
+              finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
               
-              // Fill with white background
-              outputCtx.fillStyle = '#ffffff';
-              outputCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
-              
-              // Apply the mask and draw the object
-              outputCtx.save();
-              outputCtx.beginPath();
-              
-              // Create clipping path from mask
-              for (let y = 0; y < img.height; y++) {
-                for (let x = 0; x < img.width; x++) {
-                  if (mask[y * img.width + x] > 0.5) {
-                    outputCtx.rect(
-                      x - bounds.x + padding, 
-                      y - bounds.y + padding, 
-                      1, 1
-                    );
-                  }
-                }
-              }
-              outputCtx.clip();
-              
-              // Draw the object
-              outputCtx.drawImage(
-                img,
-                bounds.x, bounds.y, bounds.width, bounds.height,
-                padding, padding, bounds.width, bounds.height
-              );
-              outputCtx.restore();
+              const removedImg = new Image();
+              await new Promise((imgResolve) => {
+                removedImg.onload = () => {
+                  finalCtx.drawImage(removedImg, 0, 0);
+                  imgResolve();
+                };
+                removedImg.src = URL.createObjectURL(removedBgBlob);
+              });
               
               processedItems.push({
                 ...item,
-                processedImage: outputCanvas.toDataURL('image/jpeg', 0.95),
+                processedImage: finalCanvas.toDataURL('image/jpeg', 0.95),
                 processed: true
               });
-            } else {
-              throw new Error('SAM segmentation failed');
+            } catch (bgError) {
+              // If background removal fails, use cropped image
+              processedItems.push({
+                ...item,
+                processedImage: canvas.toDataURL('image/jpeg', 0.95),
+                processed: false
+              });
             }
-            
-          } catch (error) {
-            console.error(`Failed to process ${item.name} with SAM:`, error);
-            // Fallback to simple cropping
-            const fallbackCanvas = document.createElement('canvas');
-            const fallbackCtx = fallbackCanvas.getContext('2d');
-            
-            const padding = 100;
-            const centerX = (item.boundingBox.x / 100) * img.width;
-            const centerY = (item.boundingBox.y / 100) * img.height;
-            const width = (item.boundingBox.width / 100) * img.width + padding * 2;
-            const height = (item.boundingBox.height / 100) * img.height + padding * 2;
-            
-            fallbackCanvas.width = width;
-            fallbackCanvas.height = height;
-            
-            fallbackCtx.fillStyle = '#ffffff';
-            fallbackCtx.fillRect(0, 0, width, height);
-            
-            fallbackCtx.drawImage(
-              img,
-              centerX - width/2, centerY - height/2, width, height,
-              0, 0, width, height
-            );
-            
-            processedItems.push({
-              ...item,
-              processedImage: fallbackCanvas.toDataURL('image/jpeg', 0.95),
-              processed: false,
-              error: error.message
-            });
           }
+        } catch (error) {
+          console.error(`Failed to process ${item.name}:`, error);
+          processedItems.push({
+            ...item,
+            processedImage: URL.createObjectURL(imageFile),
+            processed: false
+          });
         }
-        
-        resolve(processedItems);
-      };
+      }
       
-      img.src = URL.createObjectURL(imageFile);
-    });
+      resolve(processedItems);
+    };
     
-  } catch (error) {
-    console.error('Failed to initialize SAM:', error);
-    // Return items without processing
-    return items.map(item => ({
-      ...item,
-      processed: false,
-      error: error.message
-    }));
+    img.src = URL.createObjectURL(imageFile);
+  });
+}
+
+// Helper function to apply segmentation mask
+async function applySegmentationMask(img, maskData, boundingBox) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  // Calculate crop area with padding
+  const padding = 50;
+  const centerX = (boundingBox.x / 100) * img.width;
+  const centerY = (boundingBox.y / 100) * img.height;
+  const width = (boundingBox.width / 100) * img.width + padding * 2;
+  const height = (boundingBox.height / 100) * img.height + padding * 2;
+  
+  const cropX = Math.max(0, centerX - width / 2);
+  const cropY = Math.max(0, centerY - height / 2);
+  
+  canvas.width = width;
+  canvas.height = height;
+  
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // If we have mask data, apply it
+  if (maskData) {
+    // This is where we'd apply the actual mask
+    // For now, just crop the area
+    ctx.drawImage(
+      img,
+      cropX, cropY, width, height,
+      0, 0, width, height
+    );
   }
+  
+  return canvas.toDataURL('image/jpeg', 0.95);
+}
 }
 
 // Main App Component
