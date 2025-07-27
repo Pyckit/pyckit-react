@@ -10,47 +10,19 @@ const API_URL = window.location.hostname === 'localhost'
 const API_KEY_STORAGE = 'pyckit_api_key';
 
 // Components
-const Sidebar = ({ onNewChat }) => (
-  <div className="sidebar">
-    <div className="sidebar-header">
-      <div className="logo">
-        <img src="/pyckit-logo.png" alt="Pyckit" style={{ height: 32, width: 'auto' }} />
-      </div>
-      <button className="new-chat-btn" onClick={onNewChat}>
-        <span>+</span> New Analysis
-      </button>
-    </div>
-    <div className="chat-history">
-      <div className="chat-history-item active">Current Analysis</div>
-    </div>
-  </div>
-);
-
 const WelcomeScreen = ({ onFileSelect }) => {
   const fileInputRef = useRef(null);
   
   return (
-    <div className="welcome-message">
-      <h1 className="welcome-title">
-        <img src="/pyckit-logo.png" alt="Pyckit" style={{ height: 60, width: 'auto' }} />
-      </h1>
-      <p className="welcome-subtitle">Discover hidden value in your Calgary home</p>
+    <div className="welcome-container">
+      <div className="logo-header">
+        <img src="/pyckit-logo.png" alt="Pyckit" className="main-logo" />
+        <h1>Pyckit Vision AI ▼</h1>
+      </div>
       
-      <div className="upload-section" onClick={() => fileInputRef.current?.click()}>
-        <div className="upload-icon">📸</div>
-        <h2 className="upload-title">Upload Room Photo</h2>
-        <p className="upload-subtitle">Take a clear photo of any room to discover sellable items</p>
-      </div>
-
-      <div style={{ marginTop: 40, padding: 20, backgroundColor: '#FEF3C7', borderRadius: 12, textAlign: 'left' }}>
-        <h3 style={{ color: '#92400E', marginBottom: 8 }}>💡 How it works:</h3>
-        <ol style={{ color: '#92400E', marginLeft: 20, lineHeight: 1.8 }}>
-          <li>Take a clear photo of any room in your house</li>
-          <li>Our AI identifies all sellable items automatically</li>
-          <li>Professional object isolation with SAM technology</li>
-          <li>Get Calgary market prices and descriptions</li>
-        </ol>
-      </div>
+      <button className="upload-button" onClick={() => fileInputRef.current?.click()}>
+        + Upload a photo
+      </button>
       
       <input
         ref={fileInputRef}
@@ -63,1087 +35,421 @@ const WelcomeScreen = ({ onFileSelect }) => {
   );
 };
 
-const ApiKeyPrompt = ({ onSave }) => {
-  const [apiKey, setApiKey] = useState('');
-  
-  const handleSave = () => {
-    if (!apiKey || !apiKey.startsWith('sk-ant-')) {
-      alert('Please enter a valid Claude API key (should start with sk-ant-)');
-      return;
-    }
-    localStorage.setItem(API_KEY_STORAGE, apiKey);
-    onSave();
-  };
-  
+const ItemCard = ({ item, onViewListing }) => {
   return (
-    <div style={{ textAlign: 'center', padding: 40 }}>
-      <h2 style={{ color: 'var(--primary-color)', marginBottom: 20 }}>🔑 API Key Required</h2>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
-        To use Pyckit, you'll need a Claude API key from Anthropic.
-      </p>
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 20, fontStyle: 'italic' }}>
-        ✨ Good news: Professional object isolation with SAM technology!
-      </p>
-      <input
-        type="password"
-        placeholder="sk-ant-api03-..."
-        value={apiKey}
-        onChange={(e) => setApiKey(e.target.value)}
-        style={{
-          width: '100%',
-          maxWidth: 400,
-          padding: 12,
-          border: '2px solid var(--border-color)',
-          borderRadius: 8,
-          fontSize: 16,
-          marginBottom: 20
-        }}
-      />
-      <br />
-      <button onClick={handleSave} className="send-btn" style={{ position: 'static', margin: '10px auto' }}>
-        Save API Key
-      </button>
-      <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 20 }}>
-        Get your API key from{' '}
-        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" 
-           style={{ color: 'var(--primary-color)' }}>
-          console.anthropic.com
-        </a>
-      </p>
-    </div>
-  );
-};
-
-const ProcessingStatus = ({ current, total, currentItem }) => (
-  <div style={{
-    position: 'fixed',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    background: 'white',
-    padding: 40,
-    borderRadius: 12,
-    boxShadow: '0 10px 40px rgba(0,0,0,0.1)',
-    zIndex: 1000,
-    textAlign: 'center',
-    minWidth: 400
-  }}>
-    <h3 style={{ marginBottom: 20 }}>Processing Items...</h3>
-    <div style={{
-      width: '100%',
-      height: 20,
-      backgroundColor: '#f0f0f0',
-      borderRadius: 10,
-      overflow: 'hidden',
-      marginBottom: 20
-    }}>
-      <div style={{
-        width: `${(current / total) * 100}%`,
-        height: '100%',
-        backgroundColor: 'var(--primary-color)',
-        transition: 'width 0.3s ease'
-      }} />
-    </div>
-    <p style={{ color: 'var(--text-secondary)' }}>
-      Processing item {current} of {total}
-    </p>
-    {currentItem && (
-      <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 10 }}>
-        {currentItem}
-      </p>
-    )}
-  </div>
-);
-
-const ItemCard = ({ item, index, onEdit, onRemove }) => (
-  <div 
-    className="item-card" 
-    onClick={() => {
-      console.log('Card clicked - opening edit modal for index:', index);
-      onEdit(index);
-    }}
-    style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      cursor: 'pointer',
-      position: 'relative',
-      minHeight: '520px'
-    }}
-  >
-    <button 
-      className="remove-btn"
-      onClick={(e) => {
-        e.stopPropagation();
-        onRemove(index);
-      }}
-      style={{
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        background: '#ff4444',
-        color: 'white',
-        border: 'none',
-        borderRadius: '50%',
-        width: 30,
-        height: 30,
-        cursor: 'pointer',
-        fontSize: 18,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1
-      }}
-    >
-      ×
-    </button>
-    
-    <img 
-      className="item-thumbnail-large" 
-      src={item.processedImage || item.stagedImage || '#'}
-      alt={item.name}
-      style={{ backgroundColor: item.processedImage ? 'white' : '#f0f0f0' }}
-    />
-    <div className="item-name">{item.name}</div>
-    <div className="item-value">${item.value}</div>
-    <div className="item-details" style={{ flexGrow: 1 }}>
-      <p><strong>Condition:</strong> {item.condition}</p>
-      <p><strong>Description:</strong> {item.description || `${item.condition || 'Good'} condition ${item.name ? item.name.toLowerCase() : 'item'}. Well-maintained and ready for immediate use.`}</p>
-      <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}><strong>Best time:</strong> Year-round</p>
-    </div>
-    <span className="confidence-badge">{item.confidence}% match</span>
-    
-    <div 
-      style={{ 
-        display: 'flex', 
-        gap: 8, 
-        marginTop: 'auto',
-        paddingTop: 12
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        onClick={() => onEdit(index)}
-        style={{
-          flex: 1,
-          padding: '8px 16px',
-          background: 'transparent',
-          color: '#666',
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          fontSize: 14,
-          fontWeight: '500',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.borderColor = '#999';
-          e.target.style.color = '#333';
-          e.target.style.background = '#f8f8f8';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.borderColor = '#ddd';
-          e.target.style.color = '#666';
-          e.target.style.background = 'transparent';
-        }}
-      >
-        Edit
-      </button>
-      <button
-        onClick={() => alert(`Listed: ${item.name} for $${item.value}`)}
-        style={{
-          flex: 1,
-          padding: '8px 16px',
-          background: '#000',
-          color: 'white',
-          border: '1px solid #000',
-          borderRadius: 6,
-          fontSize: 14,
-          fontWeight: '500',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-        }}
-        onMouseEnter={(e) => {
-          e.target.style.background = '#333';
-          e.target.style.borderColor = '#333';
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = '#000';
-          e.target.style.borderColor = '#000';
-        }}
-      >
-        List Item
-      </button>
-    </div>
-  </div>
-);
-
-const EditModal = ({ item, onSave, onClose, onList }) => {
-  const [title, setTitle] = useState(item.name);
-  const [price, setPrice] = useState(item.value);
-  const [condition, setCondition] = useState(item.condition);
-  const [description, setDescription] = useState(item.description || '');
-  
-  const handleSave = () => {
-    onSave({ ...item, name: title, value: price, condition, description });
-  };
-  
-  const handleList = () => {
-    const updatedItem = { ...item, name: title, value: price, condition, description };
-    onSave(updatedItem, false); // false = don't show save notification
-    onList(updatedItem);
-  };
-  
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000
-    }}>
-      <div style={{
-        background: 'white',
-        borderRadius: 12,
-        padding: 32,
-        maxWidth: 600,
-        width: '90%',
-        maxHeight: '90vh',
-        overflow: 'auto'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <h2 style={{ margin: 0 }}>Edit Listing #{item.index + 1}</h2>
-          <button
-            onClick={onClose}
-            style={{
-              background: '#ff4444',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: 32,
-              height: 32,
-              cursor: 'pointer',
-              fontSize: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            ×
-          </button>
+    <div className="detailed-item-card">
+      <div className="item-badge"></div>
+      <div className="item-image-wrapper">
+        <img 
+          src={item.processedImage || item.stagedImage} 
+          alt={item.name}
+          className="detailed-item-image"
+        />
+      </div>
+      <div className="item-details-section">
+        <h3 className="item-title">{item.name}</h3>
+        <div className="item-price">${item.value}</div>
+        <div className="item-metadata">
+          <p><strong>Condition:</strong> {item.condition}</p>
+          <p><strong>Description:</strong> {item.description}</p>
+          <p><strong>Best time:</strong> Year-round</p>
         </div>
-        
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
-            TITLE
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            style={{
-              width: '100%',
-              padding: 12,
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              fontSize: 16
-            }}
-          />
+        <div className="item-confidence">
+          {item.confidence}% match
         </div>
-        
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
-            PRICE
-          </label>
-          <input
-            type="number"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            style={{
-              width: '100%',
-              padding: 12,
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              fontSize: 16
-            }}
-          />
-        </div>
-        
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
-            CONDITION
-          </label>
-          <select
-            value={condition}
-            onChange={(e) => setCondition(e.target.value)}
-            style={{
-              width: '100%',
-              padding: 12,
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              fontSize: 16
-            }}
-          >
-            <option value="Excellent">Excellent</option>
-            <option value="Very Good">Very Good</option>
-            <option value="Good">Good</option>
-            <option value="Fair">Fair</option>
-          </select>
-        </div>
-        
-        <div style={{ marginBottom: 24 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#666' }}>
-            DESCRIPTION
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            style={{
-              width: '100%',
-              padding: 12,
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              fontSize: 16,
-              resize: 'vertical'
-            }}
-          />
-        </div>
-        
-        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-          <button
-            onClick={handleSave}
-            style={{
-              flex: 1,
-              padding: '10px 20px',
-              background: 'transparent',
-              color: '#666',
-              border: '1px solid #ddd',
-              borderRadius: 6,
-              fontSize: 15,
-              fontWeight: '500',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.borderColor = '#999';
-              e.target.style.color = '#333';
-              e.target.style.background = '#f8f8f8';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.borderColor = '#ddd';
-              e.target.style.color = '#666';
-              e.target.style.background = 'transparent';
-            }}
-          >
-            Save
-          </button>
-          <button
-            onClick={handleList}
-            style={{
-              flex: 1,
-              padding: '10px 20px',
-              background: '#000',
-              color: 'white',
-              border: '1px solid #000',
-              borderRadius: 6,
-              fontSize: 15,
-              fontWeight: '500',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.background = '#333';
-              e.target.style.borderColor = '#333';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = '#000';
-              e.target.style.borderColor = '#000';
-            }}
-          >
-            List Item
-          </button>
-        </div>
+        <button 
+          className="view-listing-btn"
+          onClick={() => onViewListing(item)}
+        >
+          VIEW LISTING
+        </button>
       </div>
     </div>
   );
 };
 
 const ImageAnalysis = ({ analysisData, imageFile }) => {
-  const [items, setItems] = useState(analysisData.items || []);
-  const [totalValue, setTotalValue] = useState(analysisData.totalValue || 0);
-  const [editingItem, setEditingItem] = useState(null);
+  const [showAllItems, setShowAllItems] = useState(false);
+  const visibleItems = showAllItems ? analysisData.items : analysisData.items.slice(0, 3);
   
-  const handleEdit = (index) => {
-    setEditingItem({ ...items[index], index });
-  };
-  
-  const handleSave = (updatedItem, showNotification = true) => {
-    const newItems = [...items];
-    newItems[updatedItem.index] = updatedItem;
-    setItems(newItems);
-    
-    // Recalculate total
-    const newTotal = newItems.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
-    setTotalValue(newTotal);
-    
-    setEditingItem(null);
-    if (showNotification) {
-      alert('Changes saved! You can list this item later.');
-    }
-  };
-  
-  const handleListFromModal = (item) => {
-    alert(`Listed: ${item.name} for $${item.value}`);
-  };
-  
-  const handleRemove = (index) => {
-    if (window.confirm('Remove this item from the list?')) {
-      const newItems = items.filter((_, i) => i !== index);
-      setItems(newItems);
-      
-      // Recalculate total
-      const newTotal = newItems.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
-      setTotalValue(newTotal);
-    }
-  };
-  
-  const handleListAll = () => {
-    alert(`Ready to list all ${items.length} items! Total value: $${totalValue}`);
+  const handleViewListing = (item) => {
+    console.log('View listing for:', item.name);
+    // Add your listing logic here
   };
   
   return (
-    <div className="inventory-results">
-      <div className="total-value">
-        <h3>Total Estimated Value</h3>
-        <div className="amount">
-          ${totalValue.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-        </div>
-      </div>
+    <div className="analysis-container">
+      <h2 className="section-title">Current Analysis</h2>
       
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <button
-          onClick={handleListAll}
-          style={{
-            padding: '16px 48px',
-            background: 'var(--primary-color)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 18,
-            fontWeight: '600',
-            cursor: 'pointer'
-          }}
-        >
-          List All Items ({items.length})
-        </button>
-      </div>
-      
-      <h3 style={{ marginBottom: 16, textAlign: 'center' }}>🏠 Your Sellable Items</h3>
-      
-      <div className="items-grid">
-        {items.map((item, index) => (
-          <ItemCard 
-            key={index} 
-            item={item} 
-            index={index} 
-            onEdit={handleEdit}
-            onRemove={handleRemove}
+      {/* Original Image Display */}
+      <div className="original-image-section">
+        <p className="analysis-label">Analyze this room for sellable items</p>
+        <div className="original-image-container">
+          <img 
+            src={URL.createObjectURL(imageFile)} 
+            alt="Room analysis" 
+            className="original-image"
           />
-        ))}
+        </div>
       </div>
       
-      {editingItem && (
-        <EditModal
-          item={editingItem}
-          onSave={handleSave}
-          onList={handleListFromModal}
-          onClose={() => setEditingItem(null)}
-        />
-      )}
-      
-      {analysisData.insights?.quickWins && (
-        <div style={{ marginTop: 24, padding: 16, backgroundColor: '#E8F5E9', borderRadius: 8, maxWidth: 800, margin: '24px auto' }}>
-          <h4 style={{ color: '#2E7D32', marginBottom: 8 }}>💡 Results:</h4>
-          <ul style={{ color: '#2E7D32', marginLeft: 20, lineHeight: 1.6 }}>
-            {analysisData.insights.quickWins.map((tip, i) => (
-              <li key={i}>{tip}</li>
-            ))}
-          </ul>
+      {/* Total Value Card */}
+      <div className="value-summary-card">
+        <h3>Total estimated value</h3>
+        <div className="total-value-amount">
+          ${analysisData.totalValue.toLocaleString('en-CA')}
         </div>
-      )}
+      </div>
+      
+      {/* List All Items Button */}
+      <button className="list-all-button">
+        List all items ({analysisData.items.length})
+      </button>
+      
+      {/* Sellable Items Section */}
+      <div className="items-section">
+        <h3 className="items-title">
+          <span className="icon">🏠</span> Your Sellable Items
+        </h3>
+        
+        <div className="detailed-items-grid">
+          {visibleItems.map((item, index) => (
+            <ItemCard 
+              key={index} 
+              item={item} 
+              onViewListing={handleViewListing}
+            />
+          ))}
+        </div>
+        
+        {!showAllItems && analysisData.items.length > 3 && (
+          <div className="load-more-section">
+            <div className="separator-line">
+              <span className="separator-text">
+                Upload a room photo to discover unique items...
+              </span>
+            </div>
+            <button 
+              className="load-more-btn"
+              onClick={() => setShowAllItems(true)}
+            >
+              Load More
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-// Helper function to get mask bounds
-function getMaskBounds(mask, width, height) {
-  let minX = width, minY = height, maxX = 0, maxY = 0;
-  
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x] > 0.5) {
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
+const ErrorModal = ({ error, onClose }) => {
+  return (
+    <div className="error-overlay">
+      <div className="error-modal">
+        <div className="error-icon">⚠️</div>
+        <h2>Critical Error</h2>
+        <p className="error-message">{error}</p>
+        <button className="error-close-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// STRICT SAM segmentation - NO FALLBACKS
+async function applySegmentationMask(img, maskData, cropCoords) {
+  return new Promise((resolve, reject) => {
+    if (!maskData || !cropCoords) {
+      reject(new Error('Missing mask data or crop coordinates'));
+      return;
     }
-  }
-  
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY
-  };
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    const maskImg = new Image();
+    
+    maskImg.onload = () => {
+      try {
+        const { x1, y1, x2, y2 } = cropCoords;
+        const cropWidth = x2 - x1;
+        const cropHeight = y2 - y1;
+        
+        // Validate dimensions
+        if (cropWidth <= 0 || cropHeight <= 0) {
+          throw new Error(`Invalid crop dimensions: ${cropWidth}x${cropHeight}`);
+        }
+        
+        // Create square canvas
+        const size = Math.max(cropWidth, cropHeight) * 1.2;
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Pure white background
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, size, size);
+        
+        // Center the object
+        const offsetX = (size - cropWidth) / 2;
+        const offsetY = (size - cropHeight) / 2;
+        
+        // Draw the cropped area
+        ctx.drawImage(
+          img,
+          x1, y1, cropWidth, cropHeight,
+          offsetX, offsetY, cropWidth, cropHeight
+        );
+        
+        // Create a temporary canvas for the mask
+        const maskCanvas = document.createElement('canvas');
+        const maskCtx = maskCanvas.getContext('2d');
+        maskCanvas.width = cropWidth;
+        maskCanvas.height = cropHeight;
+        maskCtx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
+        
+        // Apply the mask
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(maskCanvas, offsetX, offsetY);
+        
+        // Ensure white background
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, size, size);
+        
+        const result = canvas.toDataURL('image/jpeg', 0.95);
+        resolve(result);
+      } catch (error) {
+        reject(new Error(`Mask application failed: ${error.message}`));
+      }
+    };
+    
+    maskImg.onerror = () => {
+      reject(new Error('Failed to load mask image data'));
+    };
+    
+    maskImg.src = maskData;
+  });
 }
 
-// Updated function to handle segmentation masks from backend
-async function processItemsLocally(items, imageFile, onProgress) {
+// STRICT processing - NO FALLBACKS
+async function processItemsLocally(items, imageFile, imageDimensions, onProgress) {
   const img = new Image();
   
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     img.onload = async () => {
       const processedItems = [];
-      
-      // Log image dimensions for debugging
-      console.log(`Processing image with dimensions: ${img.width}x${img.height}`);
+      const errors = [];
       
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         onProgress(i + 1, items.length, item.name);
         
         try {
-          // Skip if item is invalid
-          if (!item || !item.boundingBox || typeof item.boundingBox.x === 'undefined') {
-            console.error('Invalid item structure:', item);
-            processedItems.push({
-              ...item,
-              name: item?.name || 'Unknown Item',
-              processedImage: URL.createObjectURL(imageFile),
-              processed: false,
-              error: 'Invalid item structure'
-            });
-            continue;
+          // STRICT REQUIREMENT: Must have SAM segmentation
+          if (!item.hasSegmentation) {
+            throw new Error(`No SAM segmentation flag for ${item.name}`);
           }
           
-          console.log(`Processing item ${i + 1}/${items.length}: ${item.name}`);
-          console.log(`Bounding box:`, item.boundingBox);
-          
-          // If we have a segmentation mask from the backend, use it
-          if (item.hasSegmentation && item.segmentationMask) {
-            console.log(`Using SAM segmentation for ${item.name}`);
-            try {
-              const isolatedImage = await applySegmentationMask(img, item.segmentationMask, item.boundingBox);
-              if (isolatedImage) {
-                processedItems.push({
-                  ...item,
-                  processedImage: isolatedImage,
-                  processed: true  // FIXED: Mark as processed for segmented items
-                });
-                continue;
-              }
-              console.log('Falling back to simple cropping due to segmentation error');
-            } catch (segError) {
-              console.error(`Segmentation failed for ${item.name}:`, segError);
-              // Continue to fallback cropping
-            }
+          if (!item.segmentationMask) {
+            throw new Error(`No segmentation mask data for ${item.name}`);
           }
           
-          // Fallback to simple cropping if no segmentation or if it failed
-          console.log(`Using simple cropping for ${item.name}`);
+          if (!item.cropCoords) {
+            throw new Error(`No crop coordinates for ${item.name}`);
+          }
           
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          console.log(`Processing ${item.name} with SAM segmentation...`);
           
-          // Calculate crop area with tight padding for clean results
-          const padding = 0.05; // 5% padding for tight crops
-          const centerX = (item.boundingBox.x / 100) * img.width;
-          const centerY = (item.boundingBox.y / 100) * img.height;
-          const boxWidth = (item.boundingBox.width / 100) * img.width;
-          const boxHeight = (item.boundingBox.height / 100) * img.height;
-          
-          // Calculate crop area with minimal padding
-          const padX = boxWidth * padding;
-          const padY = boxHeight * padding;
-          
-          const cropX = Math.max(0, Math.floor(centerX - boxWidth/2 - padX));
-          const cropY = Math.max(0, Math.floor(centerY - boxHeight/2 - padY));
-          const cropWidth = Math.min(
-            Math.ceil(boxWidth + 2 * padX), 
-            img.width - cropX
-          );
-          const cropHeight = Math.min(
-            Math.ceil(boxHeight + 2 * padY), 
-            img.height - cropY
+          const processedImage = await applySegmentationMask(
+            img,
+            item.segmentationMask,
+            item.cropCoords
           );
           
-          // Skip if crop area is invalid
-          if (cropWidth <= 0 || cropHeight <= 0) {
-            console.error(`Invalid crop dimensions for ${item.name}: ${cropWidth}x${cropHeight}`);
-            processedItems.push({
-              ...item,
-              processedImage: URL.createObjectURL(imageFile),
-              processed: false,
-              error: 'Invalid crop dimensions'
-            });
-            continue;
+          if (!processedImage) {
+            throw new Error(`SAM processing returned null for ${item.name}`);
           }
           
-          // Set canvas to fixed square size for consistent display
-          const outputSize = 400;
-          canvas.width = outputSize;
-          canvas.height = outputSize;
-          
-          // PURE WHITE BACKGROUND
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, outputSize, outputSize);
-          
-          // Scale to fit in square while maintaining aspect ratio
-          const scale = Math.min(
-            (outputSize * 0.8) / cropWidth,  // 80% of canvas to leave padding
-            (outputSize * 0.8) / cropHeight
-          );
-          
-          const scaledWidth = cropWidth * scale;
-          const scaledHeight = cropHeight * scale;
-          
-          // Center in square canvas
-          const offsetX = (outputSize - scaledWidth) / 2;
-          const offsetY = (outputSize - scaledHeight) / 2;
-          
-          // Draw the cropped portion centered and scaled
-          try {
-            ctx.drawImage(
-              img,
-              cropX, cropY, cropWidth, cropHeight,
-              offsetX, offsetY, scaledWidth, scaledHeight
-            );
-            
-            processedItems.push({
-              ...item,
-              processedImage: canvas.toDataURL('image/jpeg', 0.95),
-              processed: true,  // Mark as processed even without segmentation
-              cropInfo: { cropX, cropY, cropWidth, cropHeight }
-            });
-            
-          } catch (drawError) {
-            console.error(`Error drawing ${item.name}:`, drawError);
-            processedItems.push({
-              ...item,
-              processedImage: URL.createObjectURL(imageFile),
-              processed: false,
-              error: drawError.message
-            });
-          }
-          
-        } catch (error) {
-          console.error(`Failed to process ${item.name}:`, error);
           processedItems.push({
             ...item,
-            processedImage: URL.createObjectURL(imageFile),
-            processed: false,
-            error: error.message
+            processedImage,
+            processed: true
           });
+          
+          console.log(`✓ Successfully processed ${item.name}`);
+          
+        } catch (error) {
+          console.error(`CRITICAL ERROR processing ${item.name}:`, error);
+          errors.push(`${item.name}: ${error.message}`);
         }
       }
       
-      // Clean up object URL
-      URL.revokeObjectURL(img.src);
-      console.log(`Finished processing ${processedItems.length} items`);
+      // If ANY errors occurred, fail the entire batch
+      if (errors.length > 0) {
+        reject(new Error(`SAM processing failed for ${errors.length} items:\n\n${errors.join('\n')}`));
+        return;
+      }
+      
       resolve(processedItems);
     };
     
     img.onerror = (error) => {
       console.error('Failed to load image:', error);
-      resolve(items.map(item => ({
-        ...item,
-        processedImage: URL.createObjectURL(imageFile),
-        processed: false,
-        error: 'Failed to load image'
-      })));
+      reject(new Error('Failed to load source image for processing'));
     };
     
-    // Load the image
     img.src = URL.createObjectURL(imageFile);
   });
 }
 
-async function applySegmentationMask(img, maskData, boundingBox) {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  
-  try {
-    // Validate inputs
-    if (!img || !maskData || !boundingBox) {
-      throw new Error('Invalid input: missing image, mask, or bounding box');
-    }
-    
-    console.log(`Applying segmentation mask with bbox:`, boundingBox);
-    
-    // Convert percentage coordinates to pixels
-    const centerX = (boundingBox.x / 100) * img.width;
-    const centerY = (boundingBox.y / 100) * img.height;
-    const boxWidth = (boundingBox.width / 100) * img.width;
-    const boxHeight = (boundingBox.height / 100) * img.height;
-    
-    // Calculate crop area with tighter padding for cleaner results
-    const padding = 0.05; // Reduced padding for tighter crops
-    const padX = boxWidth * padding;
-    const padY = boxHeight * padding;
-    
-    // Calculate crop coordinates with bounds checking
-    const cropX = Math.max(0, Math.floor(centerX - boxWidth/2 - padX));
-    const cropY = Math.max(0, Math.floor(centerY - boxHeight/2 - padY));
-    const cropWidth = Math.min(
-      Math.ceil(boxWidth + 2 * padX), 
-      img.width - cropX
-    );
-    const cropHeight = Math.min(
-      Math.ceil(boxHeight + 2 * padY), 
-      img.height - cropY
-    );
-    
-    // Validate crop dimensions
-    if (cropWidth <= 0 || cropHeight <= 0) {
-      throw new Error(`Invalid crop dimensions: ${cropWidth}x${cropHeight}`);
-    }
-    
-    // Create square canvas for consistent display
-    const outputSize = 400; // Fixed square size
-    canvas.width = outputSize;
-    canvas.height = outputSize;
-    
-    // ENSURE CLEAN WHITE BACKGROUND FIRST
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, outputSize, outputSize);
-    
-    // If we have valid mask data, apply it
-    if (maskData && typeof maskData === 'string') {
-      try {
-        const maskImg = new Image();
-        const maskLoadPromise = new Promise((resolve, reject) => {
-          maskImg.onload = resolve;
-          maskImg.onerror = () => reject(new Error('Failed to load mask image'));
-        });
-        
-        maskImg.src = maskData;
-        await maskLoadPromise;
-        
-        // Create temporary canvas for masked content
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCanvas.width = cropWidth;
-        tempCanvas.height = cropHeight;
-        
-        // Draw the original image to temp canvas
-        tempCtx.drawImage(
-          img,
-          cropX, cropY, cropWidth, cropHeight,
-          0, 0, cropWidth, cropHeight
-        );
-        
-        // Apply mask using composite operation
-        tempCtx.globalCompositeOperation = 'destination-in';
-        tempCtx.drawImage(maskImg, 0, 0, cropWidth, cropHeight);
-        
-        // Scale to fit in square while maintaining aspect ratio
-        const scale = Math.min(
-          (outputSize * 0.8) / cropWidth,
-          (outputSize * 0.8) / cropHeight
-        );
-        
-        const scaledWidth = cropWidth * scale;
-        const scaledHeight = cropHeight * scale;
-        const offsetX = (outputSize - scaledWidth) / 2;
-        const offsetY = (outputSize - scaledHeight) / 2;
-        
-        // Draw the masked content onto the white background
-        ctx.drawImage(tempCanvas, offsetX, offsetY, scaledWidth, scaledHeight);
-        
-        console.log('Successfully applied segmentation mask');
-        
-      } catch (maskError) {
-        console.error('Error applying mask, falling back to simple crop:', maskError);
-        // Fall back to simple crop on white background
-        const scale = Math.min(
-          (outputSize * 0.8) / cropWidth,
-          (outputSize * 0.8) / cropHeight
-        );
-        
-        const scaledWidth = cropWidth * scale;
-        const scaledHeight = cropHeight * scale;
-        const offsetX = (outputSize - scaledWidth) / 2;
-        const offsetY = (outputSize - scaledHeight) / 2;
-        
-        ctx.drawImage(
-          img,
-          cropX, cropY, cropWidth, cropHeight,
-          offsetX, offsetY, scaledWidth, scaledHeight
-        );
-      }
-    } else {
-      // No mask data, just crop and scale the image on white background
-      const scale = Math.min(
-        (outputSize * 0.8) / cropWidth,
-        (outputSize * 0.8) / cropHeight
-      );
-      
-      const scaledWidth = cropWidth * scale;
-      const scaledHeight = cropHeight * scale;
-      const offsetX = (outputSize - scaledWidth) / 2;
-      const offsetY = (outputSize - scaledHeight) / 2;
-      
-      ctx.drawImage(
-        img,
-        cropX, cropY, cropWidth, cropHeight,
-        offsetX, offsetY, scaledWidth, scaledHeight
-      );
-    }
-  
-    return canvas.toDataURL('image/jpeg', 0.95);
-  } catch (error) {
-    console.error('Error in applySegmentationMask:', error);
-    // Return null to indicate failure, which will trigger fallback in the calling function
-    return null;
-  }
-}
-
 // Main App Component
 export default function App() {
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [inputText, setInputText] = useState('');
-  const [, setSelectedImage] = useState(null);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [currentImage, setCurrentImage] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState(null);
-  const fileInputRef = useRef(null);
+  const [error, setError] = useState(null);
   
-  useEffect(() => {
-    const storedKey = localStorage.getItem(API_KEY_STORAGE);
-    setHasApiKey(!!storedKey);
-  }, []);
-  
-  const handleFileSelect = (event) => {
+  const handleFileSelect = async (event) => {
     const file = event.target.files[0];
     if (file && file.type.startsWith('image/')) {
-      setSelectedImage(file);
-      sendMessage('Analyze this room for sellable items', file);
+      setCurrentImage(file);
+      await analyzeImage(file);
     }
   };
   
-  const sendMessage = async (text, imageFile) => {
-    const apiKey = localStorage.getItem(API_KEY_STORAGE);
-    if (!apiKey) {
-      setHasApiKey(false);
-      return;
-    }
-    
-    setMessages([...messages, { role: 'user', text, image: imageFile }]);
+  const analyzeImage = async (imageFile) => {
     setIsLoading(true);
+    setError(null);
     
-    if (imageFile) {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64 = e.target.result.split(',')[1];
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(',')[1];
+      
+      try {
+        const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
         
-        try {
-          // Step 1: Get AI detection
-          const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
-          console.log('Sending request to:', endpoint);
-          
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image: base64,
-              roomType: 'unknown'
-            })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Server error: ${response.status} - ${errorText}`);
-          }
-          
-          const data = await response.json();
-          console.log('Backend response:', data);
-          
-          if (data.success) {
-            // Validate items array
-            if (!data.items || !Array.isArray(data.items)) {
-              throw new Error('Invalid response: missing items array');
-            }
-            
-            // Step 2: Process items with individual cropping and background removal
-            console.log('Processing items individually...');
-            console.log('Items from backend:', data.items);
-            setProcessingStatus({ current: 0, total: data.items.length });
-            
-            const processedItems = await processItemsLocally(
-              data.items, 
-              imageFile,
-              (current, total, itemName) => {
-                setProcessingStatus({ current, total, currentItem: itemName });
-              }
-            );
-            
-            setProcessingStatus(null);
-            
-            const analysisData = {
-              ...data,
-              items: processedItems,
-              imageFile
-            };
-            
-            setMessages(prev => [...prev, { 
-              role: 'assistant', 
-              component: <ImageAnalysis analysisData={analysisData} imageFile={imageFile} />
-            }]);
-          } else {
-            throw new Error(data.error || 'Analysis failed');
-          }
-        } catch (error) {
-          console.error('Full error details:', error);
-          setProcessingStatus(null);
-          
-          // Better error handling for common issues
-          let errorMessage = error.message;
-          if (error.message.includes('overloaded_error') || error.message.includes('529')) {
-            errorMessage = 'The AI service is currently overloaded. Please try again in a few moments.';
-          } else if (error.message.includes('401')) {
-            errorMessage = 'Authentication failed. Please check your API key.';
-          }
-          
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            text: `Error: ${errorMessage}` 
-          }]);
+        console.log('Sending image for analysis...');
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64,
+            roomType: 'unknown'
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Server error (${response.status}): ${errorText}`);
         }
         
-        setIsLoading(false);
-      };
-      reader.readAsDataURL(imageFile);
-    }
+        const data = await response.json();
+        console.log('Received analysis data:', data);
+        
+        if (!data.success) {
+          throw new Error(data.error || 'Analysis failed');
+        }
+        
+        // STRICT VALIDATION: Ensure ALL items have SAM segmentation
+        if (!data.items || !Array.isArray(data.items)) {
+          throw new Error('Invalid response: missing items array');
+        }
+        
+        const itemsWithoutSegmentation = data.items.filter(item => !item.hasSegmentation);
+        if (itemsWithoutSegmentation.length > 0) {
+          const names = itemsWithoutSegmentation.map(i => i.name).join(', ');
+          throw new Error(`Backend failed to provide SAM segmentation for ${itemsWithoutSegmentation.length} items: ${names}`);
+        }
+        
+        console.log(`All ${data.items.length} items have SAM segmentation. Processing...`);
+        setProcessingStatus({ current: 0, total: data.items.length });
+        
+        try {
+          const processedItems = await processItemsLocally(
+            data.items,
+            imageFile,
+            data.imageDimensions,
+            (current, total, itemName) => {
+              setProcessingStatus({ current, total, currentItem: itemName });
+            }
+          );
+          
+          setProcessingStatus(null);
+          console.log('Successfully processed all items!');
+          
+          setAnalysisResult({
+            ...data,
+            items: processedItems,
+            imageFile
+          });
+          
+        } catch (processingError) {
+          // Processing failed - this is critical
+          console.error('CRITICAL: Item processing failed', processingError);
+          setProcessingStatus(null);
+          setError(processingError.message);
+        }
+        
+      } catch (error) {
+        console.error('Analysis error:', error);
+        setProcessingStatus(null);
+        setError(error.message);
+      }
+      
+      setIsLoading(false);
+    };
     
-    setInputText('');
-    setSelectedImage(null);
+    reader.onerror = () => {
+      setError('Failed to read image file');
+      setIsLoading(false);
+    };
+    
+    reader.readAsDataURL(imageFile);
   };
-  
-  if (!hasApiKey) {
-    return (
-      <div className="app-container">
-        <Sidebar onNewChat={() => window.location.reload()} />
-        <div className="main-content">
-          <div className="chat-header">
-            <div className="model-selector">
-              <span className="model-name">Pyckit Vision AI ▼</span>
-            </div>
-          </div>
-          <div className="chat-messages">
-            <div className="message-container">
-              <ApiKeyPrompt onSave={() => setHasApiKey(true)} />
-            </div>
-          </div>
-        </div>
-        <SpeedInsights />
-      </div>
-    );
-  }
   
   return (
     <div className="app-container">
-      <Sidebar onNewChat={() => window.location.reload()} />
-      
-      <div className="main-content">
-        <div className="chat-header">
-          <div className="model-selector">
-            <span className="model-name">Pyckit Vision AI ▼</span>
-          </div>
-        </div>
-        
-        <div className="chat-messages">
-          <div className="message-container">
-            {messages.length === 0 && (
-              <WelcomeScreen onFileSelect={handleFileSelect} />
-            )}
-            
-            {messages.map((msg, index) => (
-              <div key={index} className="message">
-                <div className={`message-avatar ${msg.role === 'user' ? 'user-avatar' : 'assistant-avatar'}`}>
-                  {msg.role === 'user' ? 'U' : 'P'}
-                </div>
-                <div className="message-content">
-                  {msg.component || <div className="message-text">{msg.text}</div>}
-                  {msg.image && (
-                    <div className="image-preview" style={{ marginTop: 12 }}>
-                      <img src={URL.createObjectURL(msg.image)} alt="Uploaded" />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-            
-            {isLoading && !processingStatus && (
-              <div className="message">
-                <div className="message-avatar assistant-avatar">P</div>
-                <div className="message-content">
-                  <div className="loading-dots">
-                    <div className="loading-dot"></div>
-                    <div className="loading-dot"></div>
-                    <div className="loading-dot"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        
-        <div className="input-container">
-          <div className="input-wrapper">
-            <button className="attach-btn" onClick={() => fileInputRef.current?.click()}>
-              📎
-            </button>
-            <textarea
-              className="input-box"
-              placeholder="Upload a room photo to discover sellable items..."
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage(inputText);
-                }
-              }}
-              rows={1}
-            />
-            <button className="send-btn" onClick={() => sendMessage(inputText)}>
-              Send
-            </button>
-          </div>
-          
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileSelect}
-            style={{ display: 'none' }}
-          />
-        </div>
-      </div>
+      {!analysisResult ? (
+        <WelcomeScreen onFileSelect={handleFileSelect} />
+      ) : (
+        <ImageAnalysis analysisData={analysisResult} imageFile={currentImage} />
+      )}
       
       {processingStatus && (
-        <ProcessingStatus {...processingStatus} />
+        <div className="processing-overlay">
+          <div className="processing-modal">
+            <h3>Processing Items...</h3>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${(processingStatus.current / processingStatus.total) * 100}%` }}
+              />
+            </div>
+            <p>Processing item {processingStatus.current} of {processingStatus.total}</p>
+            {processingStatus.currentItem && (
+              <p className="processing-item">{processingStatus.currentItem}</p>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {isLoading && !processingStatus && (
+        <div className="loading-overlay">
+          <div className="loading-spinner" />
+        </div>
+      )}
+      
+      {error && (
+        <ErrorModal 
+          error={error} 
+          onClose={() => {
+            setError(null);
+            setAnalysisResult(null);
+            setCurrentImage(null);
+          }} 
+        />
       )}
       
       <SpeedInsights />
