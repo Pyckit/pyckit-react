@@ -239,30 +239,32 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
       </button>
       
       <div className="item-image-container">
-        <img 
-          src={item.processedImage || item.stagedImage || '#'}
-          alt={item.name}
-          style={{
-            backgroundColor: item.processedImage ? 'white' : '#f8f9fa',
-            maxWidth: '90%',
-            maxHeight: '90%',
-            objectFit: 'contain',
-            objectPosition: 'center',
-            transition: 'transform 0.3s ease'
-          }}
-          onLoad={(e) => {
-            // Center the image within the container
-            const img = e.target;
-            const container = img.parentElement;
-            if (img.naturalWidth > img.naturalHeight) {
-              img.style.width = '100%';
-              img.style.height = 'auto';
-            } else {
-              img.style.width = 'auto';
-              img.style.height = '90%';
-            }
-          }}
-        />
+        {item.processedImage || item.stagedImage ? (
+          <img 
+            src={item.processedImage || item.stagedImage}
+            alt={item.name || 'Detected item'}
+            onError={(e) => {
+              console.error('Error loading image:', item.processedImage || item.stagedImage);
+              e.target.onerror = null;
+              e.target.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNjY2MiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBjbGFzcz0ibHVjaWRlIGx1Y2lkZS1pbWFnZS1vZmYiPjxwYXRoIGQ9Ik0xOCAxMy4xN2E1Ljg4IDUuODggMCAwIDAtMS44Ni0xLjM2bS0yLjkyLS4xM2E2LjEgNi4xIDAgMCAwLTEuNTQuMzkiLz48cGF0aCBkPSJNOCA0YTEgMSAwIDAgMSAxLTEgNiA2IDAgMCAxIDQuNjkgMTAiLz48cGF0aCBkPSJtMTAgMTAgMS4zMy0uNjljLjI0LS4xMi41Mi0uMTkuOC0uMmguMTZjLjIzLjAxLjQ1LjA4LjY1LjJMMTYgMTIiLz48cGF0aCBkPSJNMyAxOGE2IDYgMCAwIDEgOS4zMy00Ii8+PHBhdGggZD0ibTIgMiAyMCAyMCIvPjwvc3ZnPg==';
+              e.target.style.padding = '2rem';
+              e.target.style.opacity = '0.5';
+            }}
+          />
+        ) : (
+          <div style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#f8f9fa',
+            color: '#6c757d',
+            fontSize: '0.875rem'
+          }}>
+            No image available
+          </div>
+        )}
       </div>
       
       <div className="item-details">
@@ -625,6 +627,13 @@ async function processItemsLocally(items, imageFile, onProgress) {
       // Log image dimensions for debugging
       console.log(`Processing image with dimensions: ${img.width}x${img.height}`);
       
+      // Create a temporary canvas for the full image
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = img.width;
+      fullCanvas.height = img.height;
+      const fullCtx = fullCanvas.getContext('2d');
+      fullCtx.drawImage(img, 0, 0);
+      
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         onProgress(i + 1, items.length, item.name);
@@ -652,14 +661,31 @@ async function processItemsLocally(items, imageFile, onProgress) {
             try {
               const isolatedImage = await applySegmentationMask(img, item.segmentationMask, item.boundingBox);
               if (isolatedImage) {
-                processedItems.push({
-                  ...item,
-                  processedImage: isolatedImage,
-                  processed: true
+                // Create a new image to ensure the data URL is loaded
+                const tempImg = new Image();
+                const imgLoadPromise = new Promise((resolve) => {
+                  tempImg.onload = resolve;
+                  tempImg.onerror = () => {
+                    console.error('Failed to load processed image');
+                    resolve(null);
+                  };
                 });
-                continue;
+                tempImg.src = isolatedImage;
+                await imgLoadPromise;
+                
+                if (tempImg.complete && tempImg.naturalWidth > 0) {
+                  processedItems.push({
+                    ...item,
+                    processedImage: isolatedImage,
+                    processed: true
+                  });
+                  continue;
+                } else {
+                  console.log('Processed image failed to load, falling back to simple cropping');
+                }
+              } else {
+                console.log('No isolated image returned from segmentation');
               }
-              console.log('Falling back to simple cropping due to segmentation error');
             } catch (segError) {
               console.error(`Segmentation failed for ${item.name}:`, segError);
               // Continue to fallback cropping
