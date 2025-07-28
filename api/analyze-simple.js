@@ -1,6 +1,9 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 
+// Add this at the very top of your analyze-simple.js file, right after the imports:
+const CODE_VERSION = "v2-fixed-debug-endpoints";
+
 // Try to load canvas, but don't fail if it's not available
 let canvasAvailable = false;
 try {
@@ -286,6 +289,7 @@ module.exports = async function handler(req, res) {
     const replicateToken = process.env.REPLICATE_API_TOKEN;
     
     return res.status(200).json({ 
+      version: CODE_VERSION,
       hasToken: !!replicateToken,
       tokenPrefix: replicateToken ? replicateToken.substring(0, 10) + '...' : 'NO TOKEN',
       timestamp: new Date().toISOString()
