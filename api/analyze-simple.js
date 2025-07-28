@@ -148,32 +148,38 @@ module.exports = async function handler(req, res) {
         console.log('Output type:', typeof output);
         console.log('Output keys:', output ? Object.keys(output) : 'null');
         
-        // SAM-2 returns an object with different mask outputs
+        // Process SAM-2 output to extract masks
         if (output) {
-          if (output.combined_mask) {
-            console.log('Found combined_mask in output');
-            // This is likely a single mask for all objects
+          // Check for individual masks first (preferred)
+          if (output.individual_masks && Array.isArray(output.individual_masks)) {
+            console.log(`Found ${output.individual_masks.length} individual masks`);
+            masks = output.individual_masks.map((maskUrl, index) => ({
+              mask: maskUrl,
+              type: 'individual',
+              index: index
+            }));
+          } else if (output.individual_masks && typeof output.individual_masks === 'string') {
+            // Sometimes it might return a single mask as a string
+            masks = [{
+              mask: output.individual_masks,
+              type: 'individual',
+              index: 0
+            }];
+          } else if (output.combined_mask) {
+            console.log('Only found combined_mask, no individual masks');
             masks = [{
               mask: output.combined_mask,
               type: 'combined'
             }];
           }
           
-          if (output.masks && Array.isArray(output.masks)) {
-            console.log(`Found ${output.masks.length} individual masks`);
-            masks = output.masks;
-          }
+          console.log(`Total masks extracted: ${masks.length}`);
           
-          if (output.mask) {
-            console.log('Found single mask in output');
-            masks = [{ mask: output.mask }];
+          // Log mask format for debugging
+          if (masks.length > 0) {
+            console.log('First mask sample:', masks[0].mask.substring(0, 100));
           }
-          
-          // Log all output keys for debugging
-          console.log('Full output structure:', JSON.stringify(Object.keys(output)));
         }
-        
-        console.log(`Total masks extracted: ${masks.length}`);
         
       } catch (samError) {
         console.error('SAM Automatic Mask Generation failed');

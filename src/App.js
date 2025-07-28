@@ -68,63 +68,85 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
   const ctx = canvas.getContext('2d');
   
   try {
-    // If mask is a base64 string
-    if (typeof maskData === 'string') {
-      const maskImg = new Image();
-      await new Promise((resolve, reject) => {
-        maskImg.onload = resolve;
-        maskImg.onerror = reject;
-        maskImg.src = maskData.startsWith('data:') ? maskData : `data:image/png;base64,${maskData}`;
-      });
-      
-      // Create a new canvas for the result
-      const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = canvas.width;
-      resultCanvas.height = canvas.height;
-      const resultCtx = resultCanvas.getContext('2d');
-      
-      // Draw the original image
-      resultCtx.drawImage(canvas, 0, 0);
-      
-      // Apply the mask
-      resultCtx.globalCompositeOperation = 'destination-in';
-      resultCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
-      
-      // Get the bounds of the masked object
-      const imageData = resultCtx.getImageData(0, 0, canvas.width, canvas.height);
-      const bounds = getNonTransparentBounds(imageData.data, canvas.width, canvas.height);
-      
-      if (!bounds) {
-        throw new Error('No object found in mask');
-      }
-      
-      // Create final square canvas
-      const finalSize = Math.max(bounds.width, bounds.height) * 1.2; // 20% padding
-      const finalCanvas = document.createElement('canvas');
-      finalCanvas.width = finalSize;
-      finalCanvas.height = finalSize;
-      const finalCtx = finalCanvas.getContext('2d');
-      
-      // White background
-      finalCtx.fillStyle = '#ffffff';
-      finalCtx.fillRect(0, 0, finalSize, finalSize);
-      
-      // Draw the masked object centered
-      finalCtx.drawImage(
-        resultCanvas,
-        bounds.x, bounds.y, bounds.width, bounds.height,
-        (finalSize - bounds.width) / 2,
-        (finalSize - bounds.height) / 2,
-        bounds.width, bounds.height
-      );
-      
-      return finalCanvas.toDataURL('image/jpeg', 0.95);
+    let maskSrc = maskData;
+    
+    // Handle different mask formats
+    if (typeof maskData === 'object' && maskData.mask) {
+      maskSrc = maskData.mask;
     }
     
-    // If mask is binary data or array
-    // TODO: Handle other mask formats if needed
+    // Check if it's a URL or base64
+    const isURL = typeof maskSrc === 'string' && (maskSrc.startsWith('http://') || maskSrc.startsWith('https://'));
+    const isBase64 = typeof maskSrc === 'string' && (maskSrc.startsWith('data:') || (!isURL && maskSrc.length > 100));
     
-    throw new Error('Unsupported mask format');
+    console.log('Mask format:', isURL ? 'URL' : isBase64 ? 'Base64' : 'Unknown');
+    
+    const maskImg = new Image();
+    maskImg.crossOrigin = "anonymous"; // Important for URLs
+    
+    await new Promise((resolve, reject) => {
+      maskImg.onload = resolve;
+      maskImg.onerror = (e) => {
+        console.error('Failed to load mask image:', e);
+        reject(new Error('Failed to load mask image'));
+      };
+      
+      if (isURL) {
+        maskImg.src = maskSrc;
+      } else if (isBase64 && !maskSrc.startsWith('data:')) {
+        maskImg.src = `data:image/png;base64,${maskSrc}`;
+      } else {
+        maskImg.src = maskSrc;
+      }
+    });
+    
+    console.log('Mask loaded successfully:', maskImg.width, 'x', maskImg.height);
+    
+    // Create a new canvas for the result
+    const resultCanvas = document.createElement('canvas');
+    resultCanvas.width = canvas.width;
+    resultCanvas.height = canvas.height;
+    const resultCtx = resultCanvas.getContext('2d');
+    
+    // Draw the original image
+    resultCtx.drawImage(canvas, 0, 0);
+    
+    // Apply the mask
+    resultCtx.globalCompositeOperation = 'destination-in';
+    resultCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+    
+    // Get the bounds of the masked object
+    const imageData = resultCtx.getImageData(0, 0, canvas.width, canvas.height);
+    const bounds = getNonTransparentBounds(imageData.data, canvas.width, canvas.height);
+    
+    if (!bounds) {
+      console.error('No object found in mask');
+      throw new Error('No object found in mask');
+    }
+    
+    // Create final square canvas
+    const padding = 1.2; // 20% padding
+    const finalSize = Math.max(bounds.width, bounds.height) * padding;
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = Math.round(finalSize);
+    finalCanvas.height = Math.round(finalSize);
+    const finalCtx = finalCanvas.getContext('2d');
+    
+    // White background
+    finalCtx.fillStyle = '#ffffff';
+    finalCtx.fillRect(0, 0, finalSize, finalSize);
+    
+    // Draw the masked object centered
+    const offsetX = (finalSize - bounds.width) / 2;
+    const offsetY = (finalSize - bounds.height) / 2;
+    
+    finalCtx.drawImage(
+      resultCanvas,
+      bounds.x, bounds.y, bounds.width, bounds.height,
+      offsetX, offsetY, bounds.width, bounds.height
+    );
+    
+    return finalCanvas.toDataURL('image/jpeg', 0.95);
     
   } catch (error) {
     console.error('Error applying automatic mask:', error);
