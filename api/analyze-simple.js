@@ -147,17 +147,27 @@ module.exports = async function handler(req, res) {
         console.log('SAM API response received');
         console.log('Output type:', typeof output);
         console.log('Output keys:', output ? Object.keys(output) : 'null');
+        console.log('Raw output:', output ? JSON.stringify(output).substring(0, 500) + '...' : 'null');
         
         // Process SAM-2 output to extract masks
         if (output) {
           // Check for individual masks first (preferred)
           if (output.individual_masks && Array.isArray(output.individual_masks)) {
             console.log(`Found ${output.individual_masks.length} individual masks`);
+            
+            // The masks are URLs directly, not objects
             masks = output.individual_masks.map((maskUrl, index) => ({
-              mask: maskUrl, // This is likely a URL
+              mask: maskUrl, // This should be the URL directly
               type: 'individual',
               index: index
             }));
+            
+            // Debug: Log the actual structure
+            if (output.individual_masks.length > 0) {
+              console.log('First individual mask:', output.individual_masks[0]);
+              console.log('Type of first mask:', typeof output.individual_masks[0]);
+            }
+            
           } else if (output.combined_mask) {
             console.log('Only found combined_mask, no individual masks');
             masks = [{
@@ -168,9 +178,10 @@ module.exports = async function handler(req, res) {
           
           console.log(`Total masks extracted: ${masks.length}`);
           
-          // Debug mask format
+          // Better debug output
           if (masks.length > 0) {
-            console.log('First mask:', JSON.stringify(masks[0]));
+            console.log('First mask object:', JSON.stringify(masks[0]));
+            console.log('First mask URL:', masks[0].mask);
           }
         }
         
