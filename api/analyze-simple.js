@@ -165,14 +165,14 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const prompt = `Analyze this room photo and identify all sellable items. For each, return:
-- name
-- value (CAD)
-- condition: Excellent, Very Good, Good, or Fair
-- description
-- confidence (0-100)
-- category
-- boundingBox: { x, y, width, height } (percentages, x/y = center)`;
+    const prompt = `You are an expert in home decor resale. Given the image, analyze it and return a JSON array of sellable furniture or decor items. Each item should include:
+- name (string)
+- estimated value in CAD (number)
+- condition: "Excellent", "Very Good", "Good", or "Fair"
+- short description (string)
+- confidence: number from 0 to 100
+- category (string)
+- boundingBox: an object with keys x, y, width, height — all as percentages (0-100). x/y = center of item.`;
 
     const result = await retryWithBackoff(() => model.generateContent([prompt, imageData]));
     let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
