@@ -2,13 +2,14 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 const LRU = require('lru-cache');
 
-// Simple in-memory cache for masks
+// In-memory LRU cache for mask URLs
 const maskCache = new LRU({
   max: 500,
-  ttl: 1000 * 60 * 30, // 30 minutes
+  ttl: 1000 * 60 * 30,
   updateAgeOnGet: true
 });
 
+// Detect MIME type from base64
 function detectMimeType(base64) {
   const signatures = {
     '/9j/': 'image/jpeg',
@@ -22,6 +23,7 @@ function detectMimeType(base64) {
   return 'image/jpeg';
 }
 
+// Get image dimensions
 function getImageDimensions(base64) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer[0] === 0x89 && buffer[1] === 0x50) {
@@ -60,6 +62,7 @@ function getCacheKey(imageHash, x, y) {
   return `${imageHash}-${x}-${y}`;
 }
 
+// Retry helper with backoff
 async function retryWithBackoff(fn, maxRetries = 2, delay = 2000) {
   for (let i = 0; i <= maxRetries; i++) {
     try {
@@ -79,18 +82,18 @@ async function retryWithBackoff(fn, maxRetries = 2, delay = 2000) {
   }
 }
 
+// Call SAM model
 async function processWithSAM(item, imageBase64, dimensions, replicate, imageHash, mimeType) {
   const centerX = Math.round((item.boundingBox.x / 100) * dimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * dimensions.height);
-
   const cacheKey = getCacheKey(imageHash, centerX, centerY);
-  const cachedMask = maskCache.get(cacheKey);
-  if (cachedMask) {
+  const cached = maskCache.get(cacheKey);
+  if (cached) {
     console.log(`Using cached mask for ${item.name}`);
     return {
       ...item,
       hasSegmentation: true,
-      segmentationMask: cachedMask,
+      segmentationMask: cached,
       maskFormat: 'url',
       fromCache: true
     };
@@ -108,7 +111,6 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
     );
 
     let maskUrl = null;
-
     if (output?.individual_masks?.length && typeof output.individual_masks[0] === 'string') {
       maskUrl = output.individual_masks[0];
     } else if (typeof output === 'string' && output.startsWith('http')) {
@@ -117,7 +119,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
 
     if (maskUrl) {
       maskCache.set(cacheKey, maskUrl);
-      console.log(`Successfully got mask for ${item.name}: ${maskUrl}`);
+      console.log(`Got mask for ${item.name}: ${maskUrl}`);
       return {
         ...item,
         hasSegmentation: true,
@@ -125,7 +127,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
         maskFormat: 'url'
       };
     } else {
-      console.warn(`No valid mask found for ${item.name}`);
+      console.warn(`SAM returned no valid mask for ${item.name}`);
     }
   } catch (err) {
     console.error(`SAM error for ${item.name}:`, err.message);
@@ -139,13 +141,12 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
   };
 }
 
+// API Handler
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called');
-
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', '*');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -161,9 +162,9 @@ module.exports = async function handler(req, res) {
     const mimeType = detectMimeType(image);
     const dimensions = getImageDimensions(image);
     const imageHash = hashImage(image);
-
     console.log(`Image info: ${mimeType}, ${dimensions.width}x${dimensions.height}`);
 
+    // Gemini call
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -174,14 +175,20 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const prompt = `Analyze this room photo and identify ALL sellable items. For each, return:
-- name
-- value (CAD)
-- condition (Excellent, Very Good, Good, Fair)
-- description
-- confidence (0-100)
-- category
-- boundingBox: object with x,y,width,height as percentages (0-100), with x/y as center of item.`;
+    const prompt = `
+Analyze this room photo and return ONLY a valid JSON array of sellable items.
+
+Each item should be an object with these exact keys:
+- name: string
+- value: number (CAD)
+- condition: one of: "Excellent", "Very Good", "Good", or "Fair"
+- description: short listing description
+- confidence: number from 0–100
+- category: string (e.g., "furniture", "decor", "electronics")
+- boundingBox: { x: %, y: %, width: %, height: % } where x/y is the CENTER of the object
+
+DO NOT include markdown, explanation, or extra text — return a raw JSON array ONLY.
+`;
 
     const result = await model.generateContent([prompt, imageData]);
     let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
@@ -192,10 +199,10 @@ module.exports = async function handler(req, res) {
       if (jsonMatch) {
         items = JSON.parse(jsonMatch[0]);
       } else {
-        console.warn("No valid JSON array found");
+        console.warn("⚠️ Gemini raw response:", text.slice(0, 300));
       }
     } catch (err) {
-      console.error('Gemini response parse error:', err.message);
+      console.error('Gemini JSON parse error:', err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
@@ -203,21 +210,21 @@ module.exports = async function handler(req, res) {
     const replicate = replicateToken ? new Replicate({ auth: replicateToken }) : null;
 
     const processedItems = await Promise.all(
-      items.slice(0, 3).map(async (item, i) => {
-        if (!replicate) {
-          return { ...item, hasSegmentation: false, requiresFallback: true };
-        }
+      items.slice(0, 3).map(async item => {
+        if (!replicate) return { ...item, hasSegmentation: false, requiresFallback: true };
         return await processWithSAM(item, image, dimensions, replicate, imageHash, mimeType);
       })
     );
 
-    // Add remaining (unsegmented) items
-    const allItems = [...processedItems, ...items.slice(3).map(item => ({
-      ...item,
-      hasSegmentation: false,
-      requiresFallback: true,
-      segmentationError: 'Skipped to conserve credits'
-    }))];
+    const allItems = [
+      ...processedItems,
+      ...items.slice(3).map(item => ({
+        ...item,
+        hasSegmentation: false,
+        requiresFallback: true,
+        segmentationError: 'Skipped to conserve credits'
+      }))
+    ];
 
     const totalValue = allItems.reduce((sum, i) => sum + (parseFloat(i.value) || 0), 0);
     const segmentedCount = allItems.filter(i => i.hasSegmentation).length;
@@ -240,9 +247,9 @@ module.exports = async function handler(req, res) {
         ]
       }
     });
-  } catch (error) {
-    console.error('Handler error:', error.message);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error('Handler error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 };
 
