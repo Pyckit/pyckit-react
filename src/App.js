@@ -63,6 +63,75 @@ const WelcomeScreen = ({ onFileSelect }) => {
   );
 };
 
+// Function to apply automatic segmentation mask from SAM
+async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
+  const ctx = canvas.getContext('2d');
+  
+  try {
+    // If mask is a base64 string
+    if (typeof maskData === 'string') {
+      const maskImg = new Image();
+      await new Promise((resolve, reject) => {
+        maskImg.onload = resolve;
+        maskImg.onerror = reject;
+        maskImg.src = maskData.startsWith('data:') ? maskData : `data:image/png;base64,${maskData}`;
+      });
+      
+      // Create a new canvas for the result
+      const resultCanvas = document.createElement('canvas');
+      resultCanvas.width = canvas.width;
+      resultCanvas.height = canvas.height;
+      const resultCtx = resultCanvas.getContext('2d');
+      
+      // Draw the original image
+      resultCtx.drawImage(canvas, 0, 0);
+      
+      // Apply the mask
+      resultCtx.globalCompositeOperation = 'destination-in';
+      resultCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+      
+      // Get the bounds of the masked object
+      const imageData = resultCtx.getImageData(0, 0, canvas.width, canvas.height);
+      const bounds = getNonTransparentBounds(imageData.data, canvas.width, canvas.height);
+      
+      if (!bounds) {
+        throw new Error('No object found in mask');
+      }
+      
+      // Create final square canvas
+      const finalSize = Math.max(bounds.width, bounds.height) * 1.2; // 20% padding
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = finalSize;
+      finalCanvas.height = finalSize;
+      const finalCtx = finalCanvas.getContext('2d');
+      
+      // White background
+      finalCtx.fillStyle = '#ffffff';
+      finalCtx.fillRect(0, 0, finalSize, finalSize);
+      
+      // Draw the masked object centered
+      finalCtx.drawImage(
+        resultCanvas,
+        bounds.x, bounds.y, bounds.width, bounds.height,
+        (finalSize - bounds.width) / 2,
+        (finalSize - bounds.height) / 2,
+        bounds.width, bounds.height
+      );
+      
+      return finalCanvas.toDataURL('image/jpeg', 0.95);
+    }
+    
+    // If mask is binary data or array
+    // TODO: Handle other mask formats if needed
+    
+    throw new Error('Unsupported mask format');
+    
+  } catch (error) {
+    console.error('Error applying automatic mask:', error);
+    return null;
+  }
+}
+
 // Helper function to get non-transparent bounds from image data
 function getNonTransparentBounds(imageData, width, height) {
   let minX = width, minY = height, maxX = 0, maxY = 0;
@@ -636,9 +705,22 @@ async function processItemsLocally(items, imageFile, onProgress) {
           
           // If we have a segmentation mask from the backend, use it
           if (item.hasSegmentation && item.segmentationMask) {
-            console.log(`Using SAM segmentation for ${item.name}`);
+            console.log(`Using SAM automatic segmentation for ${item.name}`);
             try {
-              const isolatedImage = await applySegmentationMask(img, item.segmentationMask, item.boundingBox);
+              // Create canvas for the full image
+              const fullCanvas = document.createElement('canvas');
+              fullCanvas.width = img.width;
+              fullCanvas.height = img.height;
+              const fullCtx = fullCanvas.getContext('2d');
+              fullCtx.drawImage(img, 0, 0);
+              
+              // Apply the automatic mask
+              const isolatedImage = await applyAutomaticSegmentationMask(
+                fullCanvas, 
+                item.segmentationMask, 
+                item.boundingBox
+              );
+              
               if (isolatedImage) {
                 // Create a new image to ensure the data URL is loaded
                 const tempImg = new Image();
@@ -658,6 +740,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
                     processedImage: isolatedImage,
                     processed: true
                   });
+                  console.log(`Successfully applied automatic mask for ${item.name}`);
                   continue;
                 } else {
                   console.log('Processed image failed to load, falling back to simple cropping');
@@ -666,7 +749,7 @@ async function processItemsLocally(items, imageFile, onProgress) {
                 console.log('No isolated image returned from segmentation');
               }
             } catch (segError) {
-              console.error(`Segmentation failed for ${item.name}:`, segError);
+              console.error(`Automatic segmentation failed for ${item.name}:`, segError);
               // Continue to fallback cropping
             }
           }
