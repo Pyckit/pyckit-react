@@ -71,14 +71,15 @@ module.exports = async function handler(req, res) {
       try {
         console.log('Calling SAM API...');
         
-        // Use SAM to automatically detect ALL objects with minimal parameters
+        // Use SAM to automatically detect ALL objects
         const output = await replicate.run(
-          "meta/sam-2-large:4641a058359ca2f5fc5b0a61afb7aed95c1aaa9c079c08346a67f51b261715a5",
+          "meta/sam-2:c87c25fa5bc9c3cef0298603178d7c9bc85c5fb0a91f88027ceea4c63f20ecb5",
           {
             input: {
               image: `data:image/jpeg;base64,${image}`,
-              model_size: "large"
-              // Using default parameters for now
+              model_size: "large",
+              iou_threshold: 0.86,
+              stability_score_threshold: 0.92
             }
           }
         );
