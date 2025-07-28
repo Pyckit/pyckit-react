@@ -93,7 +93,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
 
   try {
     const output = await retryWithBackoff(() =>
-      replicate.run("yuval-alaluf/sam-video", {
+      replicate.run("yuval-alaluf/sam-video:1e3795145d3bc2f3b5b8db90a23272801976505d97c1f273a76c8ff13c6c1b5a", {
         input: {
           image: `data:${mimeType};base64,${imageBase64}`,
           point_coords: [[centerX, centerY]],
@@ -165,14 +165,39 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const prompt = `You are an expert in home decor resale. Given the image, analyze it and return a JSON array of sellable furniture or decor items. Each item should include:
-- name (string)
-- estimated value in CAD (number)
-- condition: "Excellent", "Very Good", "Good", or "Fair"
-- short description (string)
-- confidence: number from 0 to 100
-- category (string)
-- boundingBox: an object with keys x, y, width, height — all as percentages (0-100). x/y = center of item.`;
+    const prompt = `
+You are an expert in home decor resale. Analyze the provided image and return a JSON array containing details of sellable furniture or decor items visible in the image.
+
+Each item in the array must include:
+- name (string): A clear, descriptive name for the item (e.g., "Vintage Oak Coffee Table").
+- value (number): Estimated resale value in CAD, based on current market trends.
+- condition (string): One of: "Excellent", "Very Good", "Good", or "Fair".
+- description (string): A concise sentence highlighting unique features, style, or materials (e.g., "A sleek lamp with a brass base").
+- confidence (number): Certainty score between 0 and 100.
+- category (string): One of: "Furniture", "Lighting", "Art", "Textiles", "Decor", or "Other".
+- boundingBox (object): Keys x, y, width, height (all 0–100 % of image dimensions). x/y represent the center of the item.
+
+**Context**: The image is a high-resolution, naturally lit photo showing decor like chairs, tables, lamps, or artwork. Identify items that are clearly visible and would appeal to modern buyers based on their style (e.g., mid-century, boho), materials (e.g., wood, metal, glass), and function.
+
+**Example Output**:
+[
+  {
+    "name": "Vintage Brass Floor Lamp",
+    "value": 150,
+    "condition": "Good",
+    "description": "A tall floor lamp with a brass finish and a slightly faded shade.",
+    "confidence": 85,
+    "category": "Lighting",
+    "boundingBox": { "x": 40, "y": 50, "width": 15, "height": 25 }
+  }
+]
+
+**Instructions**:
+- Only include items with estimated resale value of at least $20 CAD.
+- If an item's identity is unclear, omit it rather than guessing.
+- Focus on accuracy and relevance.
+- Return ONLY a valid JSON array. Do not include any explanation or markdown.
+`;
 
     const result = await retryWithBackoff(() => model.generateContent([prompt, imageData]));
     let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
