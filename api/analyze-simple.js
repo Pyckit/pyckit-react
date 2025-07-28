@@ -65,44 +65,76 @@ module.exports = async function handler(req, res) {
     let masks = [];
     if (replicateToken) {
       console.log('Starting SAM Automatic Mask Generation...');
+      console.log('Token exists:', !!replicateToken);
       const replicate = new Replicate({ auth: replicateToken });
       
       try {
-        // Use SAM to automatically detect ALL objects
+        console.log('Calling SAM API...');
+        
+        // Use SAM to automatically detect ALL objects with minimal parameters
         const output = await replicate.run(
           "meta/sam-2-large:4641a058359ca2f5fc5b0a61afb7aed95c1aaa9c079c08346a67f51b261715a5",
           {
             input: {
               image: `data:image/jpeg;base64,${image}`,
-              model_size: "large",
-              points_per_side: 32,
-              pred_iou_thresh: 0.86,
-              stability_score_thresh: 0.92,
-              crop_n_layers: 1,
-              crop_n_points_downscale_factor: 2,
-              min_mask_region_area: 100,
-              multimask_output: false,
-              output_format: "json" // Get structured data about masks
+              model_size: "large"
+              // Using default parameters for now
             }
           }
         );
         
-        console.log('SAM output received:', output ? 'Yes' : 'No');
+        console.log('SAM API response received');
+        console.log('Output type:', typeof output);
+        console.log('Is array:', Array.isArray(output));
+        console.log('Output keys:', output ? Object.keys(output) : 'null');
         
+        // Log first 200 chars if string
+        if (typeof output === 'string') {
+          console.log('Output sample:', output.substring(0, 200));
+        }
+        
+        // Log array length if array
+        if (Array.isArray(output)) {
+          console.log('Output array length:', output.length);
+          if (output.length > 0) {
+            console.log('First item type:', typeof output[0]);
+            console.log('First item sample:', JSON.stringify(output[0]).substring(0, 100));
+          }
+        }
+        
+        // Try different ways to extract masks
         if (output && Array.isArray(output)) {
           masks = output;
-          console.log(`SAM detected ${masks.length} objects automatically`);
+          console.log(`SAM returned array with ${masks.length} items`);
         } else if (output && output.masks) {
           masks = output.masks;
-          console.log(`SAM detected ${masks.length} objects automatically`);
+          console.log(`SAM returned object with masks property: ${masks.length} masks`);
+        } else if (output && typeof output === 'string') {
+          // Maybe it's a single mask as base64
+          masks = [{
+            mask: output,
+            bbox: [0, 0, imageDimensions.width, imageDimensions.height]
+          }];
+          console.log('SAM returned single mask as string');
         } else {
-          console.log('Unexpected SAM output format:', typeof output);
+          console.log('Unexpected SAM output format:', output);
+          console.log('Full output:', JSON.stringify(output).substring(0, 500));
         }
         
       } catch (samError) {
-        console.error('SAM Automatic Mask Generation failed:', samError.message);
-        // Continue without masks
+        console.error('SAM Automatic Mask Generation failed');
+        console.error('Error name:', samError.name);
+        console.error('Error message:', samError.message);
+        console.error('Error stack:', samError.stack);
+        
+        // Check if it's a specific Replicate error
+        if (samError.response) {
+          console.error('Response status:', samError.response.status);
+          console.error('Response data:', samError.response.data);
+        }
       }
+    } else {
+      console.log('No Replicate token found');
     }
     
     // Step 2: Use Gemini to identify what the detected objects are
