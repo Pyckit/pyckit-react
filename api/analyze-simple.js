@@ -304,72 +304,60 @@ module.exports = async function handler(req, res) {
     const replicate = new Replicate({ auth: replicateToken });
     
     try {
-      // Use a proper JPEG image with correct base64 encoding
-      // This is a small 100x100 red square JPEG
-      const testImageBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCABkAGQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD+/iiiigA==";
+      console.log('Testing SAM with Replicate example image...');
       
-      console.log('Testing SAM with proper JPEG base64 image...');
-      
-      // Test with point prompt
+      // Use the exact example from Replicate's documentation
       const testOutput = await replicate.run(
         "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
         {
           input: {
-            image: `data:image/jpeg;base64,${testImageBase64}`,
-            input_points: [[50, 50]], // Center of 100x100 image
-            input_labels: [1]
+            image: "https://replicate.delivery/pbxt/KWXwiyLFKXnhxYPvd9w5mbGnxJGkfLpWeXMfKPRIVtaVSXhIA/cats.webp",
+            input_points: [[340, 250]],
+            input_labels: [1],
+            multimask_output: false
           }
         }
       );
       
-      // Deep inspection of the output
-      const analysis = {
+      // Comprehensive analysis of the output
+      let analysis = {
         success: true,
-        output: {
-          type: typeof testOutput,
-          isNull: testOutput === null,
-          isUndefined: testOutput === undefined,
-          isArray: Array.isArray(testOutput),
-          isString: typeof testOutput === 'string',
-          keys: testOutput && typeof testOutput === 'object' ? Object.keys(testOutput) : null,
-          stringified: JSON.stringify(testOutput),
-          stringifiedLength: JSON.stringify(testOutput).length
-        }
+        rawOutput: testOutput,
+        type: typeof testOutput,
+        isNull: testOutput === null,
+        isUndefined: testOutput === undefined
       };
       
-      // If it's an object, check its properties
-      if (testOutput && typeof testOutput === 'object') {
-        analysis.details = {
-          hasIndividualMasks: !!testOutput.individual_masks,
-          individualMasksType: testOutput.individual_masks ? typeof testOutput.individual_masks : null,
-          individualMasksLength: testOutput.individual_masks ? testOutput.individual_masks.length : null,
-          hasCombinedMask: !!testOutput.combined_mask,
-          combinedMaskType: testOutput.combined_mask ? typeof testOutput.combined_mask : null,
-          hasMasks: !!testOutput.masks,
-          masksType: testOutput.masks ? typeof testOutput.masks : null
+      if (typeof testOutput === 'string') {
+        analysis.stringInfo = {
+          length: testOutput.length,
+          isURL: testOutput.startsWith('http'),
+          preview: testOutput.substring(0, 200)
+        };
+      } else if (Array.isArray(testOutput)) {
+        analysis.arrayInfo = {
+          length: testOutput.length,
+          firstItemType: testOutput.length > 0 ? typeof testOutput[0] : null,
+          firstItem: testOutput.length > 0 ? testOutput[0] : null
+        };
+      } else if (testOutput && typeof testOutput === 'object') {
+        analysis.objectInfo = {
+          keys: Object.keys(testOutput),
+          hasIndividualMasks: 'individual_masks' in testOutput,
+          hasCombinedMask: 'combined_mask' in testOutput,
+          hasMasks: 'masks' in testOutput
         };
         
-        // Check if individual_masks contains empty objects
-        if (testOutput.individual_masks && Array.isArray(testOutput.individual_masks)) {
-          analysis.individualMasksAnalysis = {
-            count: testOutput.individual_masks.length,
-            firstMask: testOutput.individual_masks[0],
-            firstMaskType: typeof testOutput.individual_masks[0],
-            firstMaskKeys: testOutput.individual_masks[0] ? Object.keys(testOutput.individual_masks[0]) : null,
-            allEmpty: testOutput.individual_masks.every(m => 
-              typeof m === 'object' && Object.keys(m).length === 0
-            )
-          };
+        // Check each property
+        for (const key of Object.keys(testOutput)) {
+          analysis.objectInfo[`${key}_type`] = typeof testOutput[key];
+          if (Array.isArray(testOutput[key])) {
+            analysis.objectInfo[`${key}_length`] = testOutput[key].length;
+            if (testOutput[key].length > 0) {
+              analysis.objectInfo[`${key}_first_item`] = testOutput[key][0];
+            }
+          }
         }
-      }
-      
-      // If it's a direct URL
-      if (typeof testOutput === 'string') {
-        analysis.stringAnalysis = {
-          isURL: testOutput.startsWith('http'),
-          length: testOutput.length,
-          preview: testOutput.substring(0, 100)
-        };
       }
       
       return res.status(200).json(analysis);
@@ -377,7 +365,45 @@ module.exports = async function handler(req, res) {
     } catch (error) {
       return res.status(500).json({ 
         error: error.message,
-        stack: error.stack 
+        details: error.response ? error.response.data : null
+      });
+    }
+  }
+  
+  // Test SAM-1 which might have clearer output
+  if (req.method === 'GET' && req.query.test === 'sam1-test') {
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    if (!replicateToken) return res.status(400).json({ error: 'No token' });
+    
+    const replicate = new Replicate({ auth: replicateToken });
+    
+    try {
+      console.log('Testing SAM-1...');
+      
+      const testOutput = await replicate.run(
+        "cjwbw/segment-anything:5655ee69c49e5c1e4f0a01c5f0b023c89b5483d4c75e84dcf75f2e07cd72e395",
+        {
+          input: {
+            image: "https://replicate.delivery/pbxt/KWXwiyLFKXnhxYPvd9w5mbGnxJGkfLpWeXMfKPRIVtaVSXhIA/cats.webp",
+            point_coords: "340,250",
+            point_labels: "1"
+          }
+        }
+      );
+      
+      return res.status(200).json({
+        success: true,
+        model: "SAM-1",
+        outputType: typeof testOutput,
+        isString: typeof testOutput === 'string',
+        isURL: typeof testOutput === 'string' && testOutput.startsWith('http'),
+        output: testOutput
+      });
+      
+    } catch (error) {
+      return res.status(500).json({ 
+        error: error.message,
+        model: "SAM-1"
       });
     }
   }
