@@ -71,7 +71,11 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     let maskSrc;
     
     // Handle different mask data structures
-    if (typeof maskData === 'object' && maskData.mask) {
+    if (typeof maskData === 'string' && maskData.startsWith('http')) {
+      // Direct URL from SAM
+      maskSrc = maskData;
+      console.log('Mask is URL:', maskSrc);
+    } else if (typeof maskData === 'object' && maskData.mask) {
       maskSrc = maskData.mask;
       console.log('Extracted mask from object:', maskSrc);
     } else if (typeof maskData === 'string') {
@@ -82,92 +86,11 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
       throw new Error('Unknown mask data structure');
     }
     
-    // Check if it's a data URL, a remote URL, or indicates mask data is present
-    const isDataURL = typeof maskSrc === 'string' && maskSrc.startsWith('data:');
-    const isURL = typeof maskSrc === 'string' && (
-      maskSrc.startsWith('http://') || 
-      maskSrc.startsWith('https://') ||
-      maskSrc.includes('replicate.delivery')
-    );
-    const isMaskData = maskSrc === 'mask-data-present';
+    console.log('Loading mask from:', maskSrc);
     
-    console.log('Mask source type:', { isDataURL, isURL, isMaskData });
-    
-    // If we only have mask data indicator, we need to handle it differently
-    if (isMaskData) {
-      console.log('Mask data present but not converted to image - using smart crop fallback');
-      
-      // Use an enhanced cropping approach with feathered edges
-      const resultCanvas = document.createElement('canvas');
-      resultCanvas.width = canvas.width;
-      resultCanvas.height = canvas.height;
-      const resultCtx = resultCanvas.getContext('2d');
-      
-      // Draw the original image
-      resultCtx.drawImage(canvas, 0, 0);
-      
-      // Create a feathered mask around the bounding box area
-      const centerX = (boundingBox.x / 100) * canvas.width;
-      const centerY = (boundingBox.y / 100) * canvas.height;
-      const boxWidth = (boundingBox.width / 100) * canvas.width;
-      const boxHeight = (boundingBox.height / 100) * canvas.height;
-      
-      // Create gradient mask for smooth edges
-      resultCtx.globalCompositeOperation = 'destination-in';
-      
-      const gradient = resultCtx.createRadialGradient(
-        centerX, centerY, 0,
-        centerX, centerY, Math.max(boxWidth, boxHeight) / 2
-      );
-      gradient.addColorStop(0, 'rgba(255,255,255,1)');
-      gradient.addColorStop(0.7, 'rgba(255,255,255,1)');
-      gradient.addColorStop(1, 'rgba(255,255,255,0)');
-      
-      resultCtx.fillStyle = gradient;
-      resultCtx.fillRect(
-        centerX - boxWidth/2, 
-        centerY - boxHeight/2, 
-        boxWidth, 
-        boxHeight
-      );
-      
-      // Get the bounds and create final image
-      const imageData = resultCtx.getImageData(0, 0, canvas.width, canvas.height);
-      const bounds = getNonTransparentBounds(imageData.data, canvas.width, canvas.height);
-      
-      if (!bounds) {
-        console.error('No object found after gradient mask');
-        throw new Error('No object found');
-      }
-      
-      // Create final square canvas
-      const padding = 1.2;
-      const finalSize = Math.max(bounds.width, bounds.height) * padding;
-      const finalCanvas = document.createElement('canvas');
-      finalCanvas.width = Math.round(finalSize);
-      finalCanvas.height = Math.round(finalSize);
-      const finalCtx = finalCanvas.getContext('2d');
-      
-      // White background
-      finalCtx.fillStyle = '#ffffff';
-      finalCtx.fillRect(0, 0, finalSize, finalSize);
-      
-      // Draw the masked object centered
-      const offsetX = (finalSize - bounds.width) / 2;
-      const offsetY = (finalSize - bounds.height) / 2;
-      
-      finalCtx.drawImage(
-        resultCanvas,
-        bounds.x, bounds.y, bounds.width, bounds.height,
-        offsetX, offsetY, bounds.width, bounds.height
-      );
-      
-      return finalCanvas.toDataURL('image/jpeg', 0.95);
-    }
-    
-    // Original mask loading code for actual image masks
+    // Load the mask image
     const maskImg = new Image();
-    maskImg.crossOrigin = "anonymous";
+    maskImg.crossOrigin = "anonymous"; // Important for CORS
     
     await new Promise((resolve, reject) => {
       maskImg.onload = () => {
@@ -182,7 +105,7 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
       maskImg.src = maskSrc;
     });
     
-    console.log('Mask loaded successfully:', maskImg.width, 'x', maskImg.height);
+    console.log('Mask loaded successfully');
     
     // Create a new canvas for the result
     const resultCanvas = document.createElement('canvas');
@@ -193,7 +116,7 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     // Draw the original image
     resultCtx.drawImage(canvas, 0, 0);
     
-    // Apply the mask
+    // Apply the mask using multiply mode to cut out the object
     resultCtx.globalCompositeOperation = 'destination-in';
     resultCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
     
@@ -206,7 +129,9 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
       throw new Error('No object found in mask');
     }
     
-    // Create final square canvas
+    console.log('Object bounds:', bounds);
+    
+    // Create final square canvas with white background
     const padding = 1.2; // 20% padding
     const finalSize = Math.max(bounds.width, bounds.height) * padding;
     const finalCanvas = document.createElement('canvas');
@@ -218,7 +143,7 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     finalCtx.fillStyle = '#ffffff';
     finalCtx.fillRect(0, 0, finalSize, finalSize);
     
-    // Add subtle shadow
+    // Add subtle shadow for professional look
     finalCtx.shadowColor = 'rgba(0, 0, 0, 0.1)';
     finalCtx.shadowBlur = 10;
     finalCtx.shadowOffsetX = 0;

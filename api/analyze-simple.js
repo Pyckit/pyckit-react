@@ -83,21 +83,57 @@ async function retryWithBackoff(fn, maxRetries = 3) {
   }
 }
 
-// Complete SAM integration that handles ALL possible output formats
+// Process SAM output to extract mask information
 async function processSAMOutput(output, imageDimensions) {
   console.log('Processing SAM output, type:', typeof output);
   
-  // Case 1: Direct URL string
+  // SAM-2 returns an object with URLs!
+  if (output && typeof output === 'object') {
+    console.log('SAM returned object with keys:', Object.keys(output));
+    
+    // Check for individual_masks (array of URLs)
+    if (output.individual_masks && Array.isArray(output.individual_masks)) {
+      console.log(`Found ${output.individual_masks.length} individual mask URLs`);
+      
+      // Return the first individual mask URL
+      if (output.individual_masks.length > 0 && typeof output.individual_masks[0] === 'string') {
+        return {
+          type: 'url',
+          maskUrl: output.individual_masks[0],
+          allMasks: output.individual_masks
+        };
+      }
+    }
+    
+    // Check for combined_mask (single URL)
+    if (output.combined_mask && typeof output.combined_mask === 'string') {
+      console.log('Found combined mask URL');
+      return {
+        type: 'url',
+        maskUrl: output.combined_mask
+      };
+    }
+    
+    // Check for direct masks property
+    if (output.masks && typeof output.masks === 'string') {
+      return {
+        type: 'url',
+        maskUrl: output.masks
+      };
+    }
+  }
+  
+  // Direct URL string (SAM-1 style)
   if (typeof output === 'string' && output.startsWith('http')) {
     console.log('SAM returned direct URL');
     return {
       type: 'url',
-      data: output,
       maskUrl: output
     };
   }
   
-  // Case 2: Array of URLs
+  console.log('Could not determine SAM output format');
+  return null;
   if (Array.isArray(output)) {
     console.log('SAM returned array, length:', output.length);
     
@@ -176,43 +212,26 @@ async function processSAMOutput(output, imageDimensions) {
 
 // Convert mask data to image based on type
 async function convertMaskToImage(maskInfo, originalImageBase64) {
-  const { type, data, maskUrl, dimensions } = maskInfo;
+  const { type, maskUrl } = maskInfo || {};
   
-  if (type === 'url') {
-    // Fetch the mask image
+  if (type === 'url' && maskUrl) {
+    // We already have a URL to the mask image!
+    console.log('SAM provided mask URL:', maskUrl);
+    
+    // Option 1: Return the URL directly (frontend will handle it)
+    return maskUrl;
+    
+    // Option 2: Fetch and convert to base64 (uncomment if needed)
+    /*
     try {
-      console.log('Fetching mask from URL:', maskUrl);
       const response = await fetch(maskUrl);
       const buffer = await response.buffer();
       return `data:image/png;base64,${buffer.toString('base64')}`;
     } catch (error) {
-      console.error('Failed to fetch mask URL:', error);
-      return null;
+      console.error('Failed to fetch mask:', error);
+      return maskUrl; // Return URL as fallback
     }
-  }
-  
-  if (type === 'array' && canvasAvailable) {
-    // Convert array to image using Canvas API in Node.js
-    const { createCanvas, createImageData } = require('canvas');
-    const canvas = createCanvas(dimensions.width, dimensions.height);
-    const ctx = canvas.getContext('2d');
-    
-    // Create image data
-    const imageData = createImageData(dimensions.width, dimensions.height);
-    const pixels = imageData.data;
-    
-    // Convert mask array to RGBA
-    for (let i = 0; i < data.length; i++) {
-      const value = data[i] > 0 ? 255 : 0;
-      const idx = i * 4;
-      pixels[idx] = value;     // R
-      pixels[idx + 1] = value; // G
-      pixels[idx + 2] = value; // B
-      pixels[idx + 3] = value; // A
-    }
-    
-    ctx.putImageData(imageData, 0, 0);
-    return canvas.toDataURL('image/png');
+    */
   }
   
   return null;
