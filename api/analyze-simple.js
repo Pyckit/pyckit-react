@@ -32,6 +32,20 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', '*');
   
   if (req.method === 'OPTIONS') return res.status(200).end();
+  
+  // Add test endpoint BEFORE the POST check
+  if (req.method === 'GET' && req.query.test === 'sam') {
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    
+    return res.status(200).json({ 
+      hasToken: !!replicateToken,
+      tokenPrefix: replicateToken ? replicateToken.substring(0, 10) + '...' : 'NO TOKEN',
+      timestamp: new Date().toISOString(),
+      message: 'SAM automatic mask test endpoint'
+    });
+  }
+  
+  // Now check for POST
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
