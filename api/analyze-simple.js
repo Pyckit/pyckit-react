@@ -1,6 +1,33 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 
+// SAM version caching
+let cachedSAMVersion = null;
+const SAM_VERSION_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+let lastVersionCheck = 0;
+
+async function getSAMVersion(replicate) {
+  const now = Date.now();
+  
+  // Use cached version if still fresh
+  if (cachedSAMVersion && (now - lastVersionCheck) < SAM_VERSION_CACHE_DURATION) {
+    return cachedSAMVersion;
+  }
+  
+  try {
+    // Try to get the latest version
+    const model = await replicate.models.get("meta", "sam-2");
+    cachedSAMVersion = model.latest_version.id;
+    lastVersionCheck = now;
+    console.log('Updated SAM version:', cachedSAMVersion);
+    return cachedSAMVersion;
+  } catch (error) {
+    console.error('Failed to fetch latest SAM version:', error);
+    // Fallback to known working version
+    return "fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83";
+  }
+}
+
 function getImageDimensions(base64) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
@@ -101,9 +128,10 @@ module.exports = async function handler(req, res) {
       try {
         console.log('Calling SAM-2 API...');
         
-        // Use the correct SAM-2 model version
+        // Get the latest SAM-2 model version with caching
+        const samVersion = await getSAMVersion(replicate);
         const output = await replicate.run(
-          "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
+          `meta/sam-2:${samVersion}`,
           {
             input: {
               image: `data:image/jpeg;base64,${image}`,
