@@ -72,7 +72,6 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     // Handle different mask data structures
     if (typeof maskData === 'string' && maskData.startsWith('http')) {
-      // Direct URL from SAM
       maskSrc = maskData;
       console.log('Mask is URL:', maskSrc);
     } else if (typeof maskData === 'object' && maskData.mask) {
@@ -90,7 +89,7 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     // Load the mask image
     const maskImg = new Image();
-    maskImg.crossOrigin = "anonymous"; // Important for CORS
+    maskImg.crossOrigin = "anonymous";
     
     await new Promise((resolve, reject) => {
       maskImg.onload = () => {
@@ -107,22 +106,25 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     console.log('Mask loaded successfully');
     
-    // Create a new canvas for the result
-    const resultCanvas = document.createElement('canvas');
-    resultCanvas.width = canvas.width;
-    resultCanvas.height = canvas.height;
-    const resultCtx = resultCanvas.getContext('2d');
+    // Create a temporary canvas for the masked result
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
     
     // Draw the original image
-    resultCtx.drawImage(canvas, 0, 0);
+    tempCtx.drawImage(canvas, 0, 0);
     
-    // Apply the mask using multiply mode to cut out the object
-    resultCtx.globalCompositeOperation = 'destination-in';
-    resultCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+    // Apply the mask using destination-in compositing
+    tempCtx.globalCompositeOperation = 'destination-in';
+    tempCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
     
-    // Get the bounds of the masked object
-    const imageData = resultCtx.getImageData(0, 0, canvas.width, canvas.height);
-    const bounds = getNonTransparentBounds(imageData.data, canvas.width, canvas.height);
+    // Reset composite operation
+    tempCtx.globalCompositeOperation = 'source-over';
+    
+    // Get the bounds of the non-transparent area
+    const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const bounds = getNonTransparentBounds(imageData.data, tempCanvas.width, tempCanvas.height);
     
     if (!bounds) {
       console.error('No object found in mask');
@@ -131,9 +133,12 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     console.log('Object bounds:', bounds);
     
-    // Create final square canvas with white background
-    const padding = 1.2; // 20% padding
-    const finalSize = Math.max(bounds.width, bounds.height) * padding;
+    // Create final canvas with proper dimensions
+    const padding = 1.1; // 10% padding
+    const paddedWidth = bounds.width * padding;
+    const paddedHeight = bounds.height * padding;
+    const finalSize = Math.max(paddedWidth, paddedHeight); // Square output
+    
     const finalCanvas = document.createElement('canvas');
     finalCanvas.width = Math.round(finalSize);
     finalCanvas.height = Math.round(finalSize);
@@ -145,19 +150,24 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     // Add subtle shadow for professional look
     finalCtx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-    finalCtx.shadowBlur = 10;
+    finalCtx.shadowBlur = 8;
     finalCtx.shadowOffsetX = 0;
     finalCtx.shadowOffsetY = 2;
     
-    // Draw the masked object centered
+    // Calculate centering offsets
     const offsetX = (finalSize - bounds.width) / 2;
     const offsetY = (finalSize - bounds.height) / 2;
     
+    // Draw ONLY the masked object (not the full image!)
     finalCtx.drawImage(
-      resultCanvas,
-      bounds.x, bounds.y, bounds.width, bounds.height,
-      offsetX, offsetY, bounds.width, bounds.height
+      tempCanvas,  // Use the masked canvas, not the original
+      bounds.x, bounds.y, bounds.width, bounds.height,  // Source rectangle (cropped area)
+      offsetX, offsetY, bounds.width, bounds.height    // Destination rectangle (centered)
     );
+    
+    // Reset shadow
+    finalCtx.shadowColor = 'transparent';
+    finalCtx.shadowBlur = 0;
     
     return finalCanvas.toDataURL('image/jpeg', 0.95);
     
