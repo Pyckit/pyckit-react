@@ -91,6 +91,13 @@ async function retryWithBackoff(fn, maxRetries = 2, initialDelay = 1000) {
     try {
       return await fn();
     } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error.message);
+      
+      // Don't retry on 404 errors - model not found
+      if (error.message.includes('404')) {
+        throw new Error('Model not found - check model name');
+      }
+      
       // Don't retry on server errors
       if (error.message.includes('502') || error.message.includes('503')) {
         throw new Error('SAM service temporarily unavailable');
@@ -141,14 +148,14 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     console.log(`Processing ${item.name} with SAM-2-VIDEO at point [${centerX}, ${centerY}]`);
     
     // Generate multiple points for better segmentation
-    const points = [];
-    const labels = [];
+    const pointCoords = [];
+    const pointLabels = [];
     const objectIds = [];
     const frames = [];
     
     // Primary foreground point (center)
-    points.push(`[${centerX},${centerY}]`);
-    labels.push("1");
+    pointCoords.push(`[${centerX},${centerY}]`);
+    pointLabels.push("1");
     objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
     frames.push("0");
     
@@ -158,13 +165,13 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     
     // Additional interior points
     if (boxWidth > 50 && boxHeight > 50) {
-      points.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
-      labels.push("1");
+      pointCoords.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
+      pointLabels.push("1");
       objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
       frames.push("0");
       
-      points.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
-      labels.push("1");
+      pointCoords.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
+      pointLabels.push("1");
       objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
       frames.push("0");
     }
@@ -179,36 +186,43 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     ];
     
     bgPoints.forEach(([x, y]) => {
-      points.push(`[${Math.round(x)},${Math.round(y)}]`);
-      labels.push("0"); // 0 = background
+      pointCoords.push(`[${Math.round(x)},${Math.round(y)}]`);
+      pointLabels.push("0"); // 0 = background
       objectIds.push("background");
       frames.push("0");
     });
     
-    console.log('Using points:', points.join(','));
-    console.log('With labels:', labels.join(','));
+    console.log('Using points:', pointCoords.join(','));
+    console.log('With labels:', pointLabels.join(','));
     
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('SAM request timed out')), 25000) // 25s for video model
+      setTimeout(() => reject(new Error('SAM request timed out')), 15000) // 15s timeout
     );
     
     const samPromise = retryWithBackoff(async () => {
-      // USE SAM-2 for images (not video version)
-      return await replicate.run(
-        "meta/sam-2",  // Using the image version of SAM-2
-        {
-          input: {
-            // Image input 
-            image: `data:${mimeType};base64,${imageBase64}`,
-            // Points in format: [[x1,y1],[x2,y2],...]
-            point_coords: points.map(p => p.replace(/[\[\]]/g, '').split(',').map(Number)),
-            // Labels: 1 = foreground, 0 = background
-            point_labels: labels.map(Number),
-            // Optional: use higher quality model
-            use_m2m: false
+      console.log('Using Replicate model: meta/sam-2-video');
+      
+      try {
+        // Use the SDK with the correct model
+        const output = await replicate.run(
+          "meta/sam-2-video",  // CORRECT MODEL for point-based segmentation
+          {
+            input: {
+              video: `data:${mimeType};base64,${imageBase64}`,
+              click_coordinates: pointCoords.join(','),
+              click_labels: pointLabels.join(','),
+              click_frames: frames.join(','),
+              click_object_ids: objectIds.join(',')
+            }
           }
-        }
-      );
+        );
+        
+        console.log('Replicate run completed successfully');
+        return output;
+      } catch (error) {
+        console.error('Replicate.run error:', error.message);
+        throw error;
+      }
     }, 2, 2000);
     
     // Log late errors even after timeout
@@ -219,11 +233,12 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     // Race between SAM and timeout
     const output = await Promise.race([samPromise, timeoutPromise]);
     
-    console.log('SAM-2-video output:', typeof output, output ? Object.keys(output) : 'null');
+    console.log('SAM-2-VIDEO output:', typeof output, output ? Object.keys(output) : 'null');
     
-    // Extract mask URL from video model output
+    // Extract mask URL from model output
     let maskUrl = null;
     
+    // For SAM-2-VIDEO, check various output formats
     if (output && output.individual_masks && Array.isArray(output.individual_masks)) {
       // Find the mask for our object (not the background)
       for (let i = 0; i < output.individual_masks.length; i++) {
@@ -250,7 +265,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
       // Cache the result
       maskCache.set(cacheKey, maskUrl);
       
-      console.log(`Successfully got mask for ${item.name} using SAM-2-video: ${maskUrl}`);
+      console.log(`Successfully got mask for ${item.name} using SAM-2-VIDEO: ${maskUrl.substring(0, 50)}...`);
       return {
         ...item,
         hasSegmentation: true,
@@ -258,7 +273,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
         maskFormat: 'url'
       };
     } else {
-      console.warn(`SAM-2-video returned invalid mask format for ${item.name}:`, output);
+      console.warn(`SAM-2-VIDEO returned invalid mask format for ${item.name}:`, output);
     }
     
   } catch (error) {
