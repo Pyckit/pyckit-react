@@ -64,6 +64,7 @@ const WelcomeScreen = ({ onFileSelect }) => {
 };
 
 // Function to apply automatic segmentation mask from SAM
+
 async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
   const ctx = canvas.getContext('2d');
   
@@ -106,6 +107,14 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     
     console.log('Mask loaded successfully');
     
+    // DEBUG: Save the mask to see what it looks like
+    const debugCanvas = document.createElement('canvas');
+    debugCanvas.width = maskImg.width;
+    debugCanvas.height = maskImg.height;
+    const debugCtx = debugCanvas.getContext('2d');
+    debugCtx.drawImage(maskImg, 0, 0);
+    console.log('DEBUG - Mask preview:', debugCanvas.toDataURL('image/png').substring(0, 100));
+    
     // Create a temporary canvas for the masked result
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width;
@@ -122,6 +131,10 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     // Reset composite operation
     tempCtx.globalCompositeOperation = 'source-over';
     
+    // DEBUG: Check what we have after masking
+    const maskedPreview = tempCanvas.toDataURL('image/png').substring(0, 100);
+    console.log('DEBUG - Masked result preview:', maskedPreview);
+    
     // Get the bounds of the non-transparent area
     const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
     const bounds = getNonTransparentBounds(imageData.data, tempCanvas.width, tempCanvas.height);
@@ -132,6 +145,18 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     }
     
     console.log('Object bounds:', bounds);
+    console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
+    console.log('Bounds as percentage of canvas:', {
+      x: (bounds.x / canvas.width * 100).toFixed(1) + '%',
+      y: (bounds.y / canvas.height * 100).toFixed(1) + '%',
+      width: (bounds.width / canvas.width * 100).toFixed(1) + '%',
+      height: (bounds.height / canvas.height * 100).toFixed(1) + '%'
+    });
+    
+    // Check if bounds are suspiciously large (might be the whole image)
+    if (bounds.width > canvas.width * 0.9 || bounds.height > canvas.height * 0.9) {
+      console.warn('WARNING: Bounds are very large, mask might not be working correctly');
+    }
     
     // Create final canvas with proper dimensions
     const padding = 1.1; // 10% padding
@@ -158,6 +183,9 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     const offsetX = (finalSize - bounds.width) / 2;
     const offsetY = (finalSize - bounds.height) / 2;
     
+    console.log('Drawing from tempCanvas:', bounds.x, bounds.y, bounds.width, bounds.height);
+    console.log('Drawing to finalCanvas at:', offsetX, offsetY);
+    
     // Draw ONLY the masked object (not the full image!)
     finalCtx.drawImage(
       tempCanvas,  // Use the masked canvas, not the original
@@ -169,7 +197,10 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
     finalCtx.shadowColor = 'transparent';
     finalCtx.shadowBlur = 0;
     
-    return finalCanvas.toDataURL('image/jpeg', 0.95);
+    const finalResult = finalCanvas.toDataURL('image/jpeg', 0.95);
+    console.log('DEBUG - Final result preview:', finalResult.substring(0, 100));
+    
+    return finalResult;
     
   } catch (error) {
     console.error('Error applying automatic mask:', error);
