@@ -193,21 +193,19 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     );
     
     const samPromise = retryWithBackoff(async () => {
-      // USE CORRECT SAM-2-VIDEO MODEL ID!
+      // USE SAM-2 for images (not video version)
       return await replicate.run(
-        "meta/sam-2-video",  // FIXED: Use the correct model ID without version hash
+        "meta/sam-2",  // Using the image version of SAM-2
         {
           input: {
-            // Video input accepts single images too!
-            video: `data:${mimeType};base64,${imageBase64}`,
-            // Comma-separated string of coordinates
-            click_coordinates: points.join(','),
+            // Image input 
+            image: `data:${mimeType};base64,${imageBase64}`,
+            // Points in format: [[x1,y1],[x2,y2],...]
+            point_coords: points.map(p => p.replace(/[\[\]]/g, '').split(',').map(Number)),
             // Labels: 1 = foreground, 0 = background
-            click_labels: labels.join(','),
-            // Object IDs
-            click_object_ids: objectIds.join(','),
-            // Frame numbers (0 for static image)
-            click_frames: frames.join(',')
+            point_labels: labels.map(Number),
+            // Optional: use higher quality model
+            use_m2m: false
           }
         }
       );
@@ -467,7 +465,7 @@ module.exports = async function handler(req, res) {
           segmentedCount > 0 
             ? `${segmentedCount} items professionally isolated with AI` 
             : 'Items identified and ready for listing',
-          samAvailable ? 'Using advanced SAM-2 video model for precise isolation' : 'Ready for marketplace listings'
+          samAvailable ? 'Using SAM-2-VIDEO model for precise isolation' : 'Ready for marketplace listings'
         ]
       }
     });
