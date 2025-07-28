@@ -304,18 +304,19 @@ module.exports = async function handler(req, res) {
     const replicate = new Replicate({ auth: replicateToken });
     
     try {
-      // Use a working test image (small 8x8 pixel image)
-      const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABHNCSVQICAgIfAhkiAAAAFZJREFUGFdjZGBg+M9ABMiuVmeE8U9cp/3PQARwYvL5D1fAwMDAyMHBzsguKirCiM0iZmY2RhYWFkYGBgYGJiYmRjCfiYmJgRjAyMjIyMDAwMAIjB4GALosEjVILpO9AAAAAElFTkSuQmCC";
+      // Use a proper JPEG image with correct base64 encoding
+      // This is a small 100x100 red square JPEG
+      const testImageBase64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCABkAGQDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD+/iiiigA==";
       
-      console.log('Testing SAM with base64 image...');
+      console.log('Testing SAM with proper JPEG base64 image...');
       
       // Test with point prompt
       const testOutput = await replicate.run(
         "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
         {
           input: {
-            image: `data:image/png;base64,${testImageBase64}`,
-            input_points: [[4, 4]], // Center of 8x8 image
+            image: `data:image/jpeg;base64,${testImageBase64}`,
+            input_points: [[50, 50]], // Center of 100x100 image
             input_labels: [1]
           }
         }
@@ -377,6 +378,41 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ 
         error: error.message,
         stack: error.stack 
+      });
+    }
+  }
+  
+  // Test SAM with a URL-based image
+  if (req.method === 'GET' && req.query.test === 'sam-url') {
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    if (!replicateToken) return res.status(400).json({ error: 'No token' });
+    
+    const replicate = new Replicate({ auth: replicateToken });
+    
+    try {
+      // Use a public test image URL
+      const testOutput = await replicate.run(
+        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
+        {
+          input: {
+            image: "https://replicate.delivery/pbxt/JL7sHpcZ4R5HnkUrbFNHLCyJO8rGNAooxyyL0N5kGb0LZWGR/test-image.jpg",
+            input_points: [[400, 300]],
+            input_labels: [1]
+          }
+        }
+      );
+      
+      return res.status(200).json({
+        success: true,
+        outputType: typeof testOutput,
+        output: testOutput,
+        isString: typeof testOutput === 'string',
+        isURL: typeof testOutput === 'string' && testOutput.startsWith('http')
+      });
+      
+    } catch (error) {
+      return res.status(500).json({ 
+        error: error.message 
       });
     }
   }
