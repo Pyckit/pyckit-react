@@ -300,13 +300,18 @@ module.exports = async function handler(req, res) {
     const replicate = new Replicate({ auth: replicateToken });
     
     try {
-      // Test with a simple image
+      // Use a working test image
+      const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABHNCSVQICAgIfAhkiAAAAFZJREFUGFdjZGBg+M9ABMiuVmeE8U9cp/3PQARwYvL5D1fAwMDAyMHBzsguKirCiM0iZmY2RhYWFkYGBgYGJiYmRjCfiYmJgRjAyMjIyMDAwMAIjB4GALosEjVILpO9AAAAAElFTkSuQmCC";
+      
+      console.log('Testing SAM with base64 image...');
+      
+      // Test with point prompt
       const testOutput = await replicate.run(
         "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
         {
           input: {
-            image: "https://replicate.delivery/pbxt/JvLXLLHgpfNHLFT8pPJuNcbO7WO0Vm8dJigFeEkn9pe4AwnyYF0/room.jpg",
-            input_points: [[400, 300]],
+            image: `data:image/png;base64,${testImageBase64}`,
+            input_points: [[4, 4]], // Center of 8x8 image
             input_labels: [1]
           }
         }
@@ -314,22 +319,53 @@ module.exports = async function handler(req, res) {
       
       // Deep inspection of the output
       const analysis = {
-        type: typeof testOutput,
-        isArray: Array.isArray(testOutput),
-        keys: testOutput && typeof testOutput === 'object' ? Object.keys(testOutput) : null,
-        stringified: JSON.stringify(testOutput),
-        individualMasksType: testOutput?.individual_masks ? typeof testOutput.individual_masks : 'not present',
-        firstIndividualMask: testOutput?.individual_masks?.[0] ? {
-          type: typeof testOutput.individual_masks[0],
-          keys: Object.keys(testOutput.individual_masks[0]),
-          isEmpty: isEmptyObject(testOutput.individual_masks[0])
-        } : 'not present',
-        combinedMaskType: testOutput?.combined_mask ? typeof testOutput.combined_mask : 'not present',
-        // Check if it's directly a URL
-        isDirectURL: typeof testOutput === 'string' && testOutput.startsWith('http'),
-        // Check if it's an array of URLs
-        isURLArray: Array.isArray(testOutput) && testOutput.length > 0 && typeof testOutput[0] === 'string'
+        success: true,
+        output: {
+          type: typeof testOutput,
+          isNull: testOutput === null,
+          isUndefined: testOutput === undefined,
+          isArray: Array.isArray(testOutput),
+          isString: typeof testOutput === 'string',
+          keys: testOutput && typeof testOutput === 'object' ? Object.keys(testOutput) : null,
+          stringified: JSON.stringify(testOutput),
+          stringifiedLength: JSON.stringify(testOutput).length
+        }
       };
+      
+      // If it's an object, check its properties
+      if (testOutput && typeof testOutput === 'object') {
+        analysis.details = {
+          hasIndividualMasks: !!testOutput.individual_masks,
+          individualMasksType: testOutput.individual_masks ? typeof testOutput.individual_masks : null,
+          individualMasksLength: testOutput.individual_masks ? testOutput.individual_masks.length : null,
+          hasCombinedMask: !!testOutput.combined_mask,
+          combinedMaskType: testOutput.combined_mask ? typeof testOutput.combined_mask : null,
+          hasMasks: !!testOutput.masks,
+          masksType: testOutput.masks ? typeof testOutput.masks : null
+        };
+        
+        // Check if individual_masks contains empty objects
+        if (testOutput.individual_masks && Array.isArray(testOutput.individual_masks)) {
+          analysis.individualMasksAnalysis = {
+            count: testOutput.individual_masks.length,
+            firstMask: testOutput.individual_masks[0],
+            firstMaskType: typeof testOutput.individual_masks[0],
+            firstMaskKeys: testOutput.individual_masks[0] ? Object.keys(testOutput.individual_masks[0]) : null,
+            allEmpty: testOutput.individual_masks.every(m => 
+              typeof m === 'object' && Object.keys(m).length === 0
+            )
+          };
+        }
+      }
+      
+      // If it's a direct URL
+      if (typeof testOutput === 'string') {
+        analysis.stringAnalysis = {
+          isURL: testOutput.startsWith('http'),
+          length: testOutput.length,
+          preview: testOutput.substring(0, 100)
+        };
+      }
       
       return res.status(200).json(analysis);
       
@@ -339,6 +375,67 @@ module.exports = async function handler(req, res) {
         stack: error.stack 
       });
     }
+  }
+  
+  // Test endpoint to compare different SAM models
+  if (req.method === 'GET' && req.query.test === 'sam-compare') {
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    if (!replicateToken) return res.status(400).json({ error: 'No token' });
+    
+    const replicate = new Replicate({ auth: replicateToken });
+    
+    // Small test image
+    const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABHNCSVQICAgIfAhkiAAAAFZJREFUGFdjZGBg+M9ABMiuVmeE8U9cp/3PQARwYvL5D1fAwMDAyMHBzsguKirCiM0iZmY2RhYWFkYGBgYGJiYmRjCfiYmJgRjAyMjIyMDAwMAIjB4GALosEjVILpO9AAAAAElFTkSuQmCC";
+    
+    const results = {};
+    
+    // Test SAM-2
+    try {
+      const output = await replicate.run(
+        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
+        {
+          input: {
+            image: `data:image/png;base64,${testImageBase64}`,
+            input_points: [[4, 4]],
+            input_labels: [1]
+          }
+        }
+      );
+      results.sam2 = {
+        success: true,
+        outputType: typeof output,
+        hasData: !!output && JSON.stringify(output) !== '{}'
+      };
+    } catch (e) {
+      results.sam2 = { success: false, error: e.message };
+    }
+    
+    // Add delay to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Test SAM-1
+    try {
+      const output = await replicate.run(
+        "daanelson/segment-anything:8b26b3b29f94e5e167c19e8de1c38e295dcb98c93897b237e6fe5a3248ade5ef",
+        {
+          input: {
+            image: `data:image/png;base64,${testImageBase64}`,
+            x: 4,
+            y: 4
+          }
+        }
+      );
+      results.sam1 = {
+        success: true,
+        outputType: typeof output,
+        isURL: typeof output === 'string' && output.startsWith('http'),
+        preview: typeof output === 'string' ? output.substring(0, 100) : JSON.stringify(output).substring(0, 100)
+      };
+    } catch (e) {
+      results.sam1 = { success: false, error: e.message };
+    }
+    
+    return res.status(200).json(results);
   }
   
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
