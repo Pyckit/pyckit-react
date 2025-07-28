@@ -300,7 +300,7 @@ module.exports = async function handler(req, res) {
     const replicate = new Replicate({ auth: replicateToken });
     
     try {
-      // Use a working test image
+      // Use a working test image (small 8x8 pixel image)
       const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABHNCSVQICAgIfAhkiAAAAFZJREFUGFdjZGBg+M9ABMiuVmeE8U9cp/3PQARwYvL5D1fAwMDAyMHBzsguKirCiM0iZmY2RhYWFkYGBgYGJiYmRjCfiYmJgRjAyMjIyMDAwMAIjB4GALosEjVILpO9AAAAAElFTkSuQmCC";
       
       console.log('Testing SAM with base64 image...');
@@ -377,7 +377,7 @@ module.exports = async function handler(req, res) {
     }
   }
   
-  // Test endpoint to compare different SAM models
+  // Compare different SAM models
   if (req.method === 'GET' && req.query.test === 'sam-compare') {
     const replicateToken = process.env.REPLICATE_API_TOKEN;
     if (!replicateToken) return res.status(400).json({ error: 'No token' });
@@ -404,7 +404,8 @@ module.exports = async function handler(req, res) {
       results.sam2 = {
         success: true,
         outputType: typeof output,
-        hasData: !!output && JSON.stringify(output) !== '{}'
+        hasData: !!output && JSON.stringify(output) !== '{}',
+        preview: JSON.stringify(output).substring(0, 200)
       };
     } catch (e) {
       results.sam2 = { success: false, error: e.message };
@@ -416,7 +417,7 @@ module.exports = async function handler(req, res) {
     // Test SAM-1
     try {
       const output = await replicate.run(
-        "daanelson/segment-anything:8b26b3b29f94e5e167c19e8de1c38e295dcb98c93897b237e6fe5a3248ade5ef",
+        "daanelson/segment-anything:b4139f11fcc4160c3771e1de0d58fd73c0df109e9c460fc0e9ef9bb96fe4414e",
         {
           input: {
             image: `data:image/png;base64,${testImageBase64}`,
