@@ -63,20 +63,28 @@ function isEmptyObject(obj) {
   return obj && typeof obj === 'object' && Object.keys(obj).length === 0;
 }
 
-// Helper to handle rate limiting with exponential backoff
+// Helper to handle rate limiting and server errors with backoff
 async function retryWithBackoff(fn, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error) {
-      if (error.message.includes('429') && i < maxRetries - 1) {
-        const retryMatch = error.message.match(/"retry_after":(\d+)/);
+      // Handle 502 Bad Gateway errors with a 30s wait
+      if (error.message.includes('502') && i < maxRetries - 1) {
+        console.log(`Server error (502). Waiting 30s before retry ${i + 1}/${maxRetries}`);
+        await new Promise(resolve => setTimeout(resolve, 30000)); // 30 second wait
+      }
+      // Handle rate limiting (429)
+      else if (error.message.includes('429') && i < maxRetries - 1) {
+        const retryMatch = error.message.match(/\"retry_after\":(\d+)/);
         const retryAfter = retryMatch ? parseInt(retryMatch[1]) : 7;
         const waitTime = (retryAfter + 1) * 1000;
         
         console.log(`Rate limited. Waiting ${waitTime}ms before retry ${i + 1}/${maxRetries}`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-      } else {
+      } 
+      // Re-throw if we've reached max retries or it's not a retryable error
+      else {
         throw error;
       }
     }
