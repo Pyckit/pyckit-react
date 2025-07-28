@@ -193,9 +193,9 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     );
     
     const samPromise = retryWithBackoff(async () => {
-      // USE SAM-2-VIDEO MODEL FOR POINT-BASED SEGMENTATION!
+      // USE CORRECT SAM-2-VIDEO MODEL ID!
       return await replicate.run(
-        "meta/sam-2-video:c6810eaa22a03713a02be84a95b506dd94dc90e0bc6ef4cc95e03b837713e275",
+        "meta/sam-2-video",  // FIXED: Use the correct model ID without version hash
         {
           input: {
             // Video input accepts single images too!
