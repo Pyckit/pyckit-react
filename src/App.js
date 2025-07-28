@@ -68,36 +68,44 @@ async function applyAutomaticSegmentationMask(canvas, maskData, boundingBox) {
   const ctx = canvas.getContext('2d');
   
   try {
-    let maskSrc = maskData;
+    let maskSrc;
     
-    // Handle different mask formats
+    // Handle different mask data structures
     if (typeof maskData === 'object' && maskData.mask) {
       maskSrc = maskData.mask;
+      console.log('Extracted mask from object:', maskSrc);
+    } else if (typeof maskData === 'string') {
+      maskSrc = maskData;
+      console.log('Mask is string:', maskSrc);
+    } else {
+      console.error('Unknown mask data structure:', maskData);
+      throw new Error('Unknown mask data structure');
     }
     
-    // Check if it's a URL or base64
-    const isURL = typeof maskSrc === 'string' && (maskSrc.startsWith('http://') || maskSrc.startsWith('https://'));
-    const isBase64 = typeof maskSrc === 'string' && (maskSrc.startsWith('data:') || (!isURL && maskSrc.length > 100));
+    // Check if it's a URL
+    const isURL = typeof maskSrc === 'string' && (
+      maskSrc.startsWith('http://') || 
+      maskSrc.startsWith('https://') ||
+      maskSrc.includes('replicate.delivery')
+    );
     
-    console.log('Mask format:', isURL ? 'URL' : isBase64 ? 'Base64' : 'Unknown');
+    console.log('Mask source:', maskSrc);
+    console.log('Is URL:', isURL);
     
     const maskImg = new Image();
     maskImg.crossOrigin = "anonymous"; // Important for URLs
     
     await new Promise((resolve, reject) => {
-      maskImg.onload = resolve;
+      maskImg.onload = () => {
+        console.log('Mask image loaded:', maskImg.width, 'x', maskImg.height);
+        resolve();
+      };
       maskImg.onerror = (e) => {
-        console.error('Failed to load mask image:', e);
+        console.error('Failed to load mask from:', maskSrc);
         reject(new Error('Failed to load mask image'));
       };
       
-      if (isURL) {
-        maskImg.src = maskSrc;
-      } else if (isBase64 && !maskSrc.startsWith('data:')) {
-        maskImg.src = `data:image/png;base64,${maskSrc}`;
-      } else {
-        maskImg.src = maskSrc;
-      }
+      maskImg.src = maskSrc;
     });
     
     console.log('Mask loaded successfully:', maskImg.width, 'x', maskImg.height);

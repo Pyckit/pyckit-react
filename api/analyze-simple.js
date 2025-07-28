@@ -154,17 +154,10 @@ module.exports = async function handler(req, res) {
           if (output.individual_masks && Array.isArray(output.individual_masks)) {
             console.log(`Found ${output.individual_masks.length} individual masks`);
             masks = output.individual_masks.map((maskUrl, index) => ({
-              mask: maskUrl,
+              mask: maskUrl, // This is likely a URL
               type: 'individual',
               index: index
             }));
-          } else if (output.individual_masks && typeof output.individual_masks === 'string') {
-            // Sometimes it might return a single mask as a string
-            masks = [{
-              mask: output.individual_masks,
-              type: 'individual',
-              index: 0
-            }];
           } else if (output.combined_mask) {
             console.log('Only found combined_mask, no individual masks');
             masks = [{
@@ -175,9 +168,9 @@ module.exports = async function handler(req, res) {
           
           console.log(`Total masks extracted: ${masks.length}`);
           
-          // Log mask format for debugging
+          // Debug mask format
           if (masks.length > 0) {
-            console.log('First mask sample:', masks[0].mask.substring(0, 100));
+            console.log('First mask:', JSON.stringify(masks[0]));
           }
         }
         
