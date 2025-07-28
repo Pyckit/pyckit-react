@@ -45,6 +45,36 @@ module.exports = async function handler(req, res) {
     });
   }
   
+  // Debug endpoint to list available SAM models
+  if (req.method === 'GET' && req.query.test === 'list-sam') {
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    
+    if (!replicateToken) {
+      return res.status(400).json({ error: 'No token' });
+    }
+    
+    try {
+      const response = await fetch('https://api.replicate.com/v1/models?query=sam', {
+        headers: {
+          'Authorization': `Token ${replicateToken}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      return res.status(200).json({
+        models: data.results?.map(m => ({
+          name: m.name,
+          owner: m.owner,
+          latest_version: m.latest_version?.id,
+          url: m.url
+        })) || []
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+  
   // Now check for POST
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -69,69 +99,60 @@ module.exports = async function handler(req, res) {
       const replicate = new Replicate({ auth: replicateToken });
       
       try {
-        console.log('Calling SAM API...');
+        console.log('Calling SAM-2 API...');
         
-        // Use SAM to automatically detect ALL objects
+        // Use the correct SAM-2 model version
         const output = await replicate.run(
-          "meta/sam-2:c87c25fa5bc9c3cef0298603178d7c9bc85c5fb0a91f88027ceea4c63f20ecb5",
+          "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
           {
             input: {
               image: `data:image/jpeg;base64,${image}`,
-              model_size: "large",
-              iou_threshold: 0.86,
-              stability_score_threshold: 0.92
+              use_m2m: true, // Enable mask-to-mask for better quality
+              multimask_output: true, // Get multiple masks per object
+              points_per_side: 32,
+              pred_iou_thresh: 0.86,
+              stability_score_thresh: 0.92
             }
           }
         );
         
         console.log('SAM API response received');
         console.log('Output type:', typeof output);
-        console.log('Is array:', Array.isArray(output));
         console.log('Output keys:', output ? Object.keys(output) : 'null');
         
-        // Log first 200 chars if string
-        if (typeof output === 'string') {
-          console.log('Output sample:', output.substring(0, 200));
-        }
-        
-        // Log array length if array
-        if (Array.isArray(output)) {
-          console.log('Output array length:', output.length);
-          if (output.length > 0) {
-            console.log('First item type:', typeof output[0]);
-            console.log('First item sample:', JSON.stringify(output[0]).substring(0, 100));
+        // SAM-2 returns an object with different mask outputs
+        if (output) {
+          if (output.combined_mask) {
+            console.log('Found combined_mask in output');
+            // This is likely a single mask for all objects
+            masks = [{
+              mask: output.combined_mask,
+              type: 'combined'
+            }];
           }
+          
+          if (output.masks && Array.isArray(output.masks)) {
+            console.log(`Found ${output.masks.length} individual masks`);
+            masks = output.masks;
+          }
+          
+          if (output.mask) {
+            console.log('Found single mask in output');
+            masks = [{ mask: output.mask }];
+          }
+          
+          // Log all output keys for debugging
+          console.log('Full output structure:', JSON.stringify(Object.keys(output)));
         }
         
-        // Try different ways to extract masks
-        if (output && Array.isArray(output)) {
-          masks = output;
-          console.log(`SAM returned array with ${masks.length} items`);
-        } else if (output && output.masks) {
-          masks = output.masks;
-          console.log(`SAM returned object with masks property: ${masks.length} masks`);
-        } else if (output && typeof output === 'string') {
-          // Maybe it's a single mask as base64
-          masks = [{
-            mask: output,
-            bbox: [0, 0, imageDimensions.width, imageDimensions.height]
-          }];
-          console.log('SAM returned single mask as string');
-        } else {
-          console.log('Unexpected SAM output format:', output);
-          console.log('Full output:', JSON.stringify(output).substring(0, 500));
-        }
+        console.log(`Total masks extracted: ${masks.length}`);
         
       } catch (samError) {
         console.error('SAM Automatic Mask Generation failed');
-        console.error('Error name:', samError.name);
-        console.error('Error message:', samError.message);
-        console.error('Error stack:', samError.stack);
-        
-        // Check if it's a specific Replicate error
+        console.error('Error:', samError.message);
         if (samError.response) {
           console.error('Response status:', samError.response.status);
-          console.error('Response data:', samError.response.data);
+          console.error('Response data:', JSON.stringify(samError.response.data));
         }
       }
     } else {
