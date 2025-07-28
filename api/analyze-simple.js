@@ -297,78 +297,129 @@ module.exports = async function handler(req, res) {
   }
   
   // Critical debug endpoint to understand SAM output
-  if (req.method === 'GET' && req.query.test === 'sam-debug') {
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
-    if (!replicateToken) return res.status(400).json({ error: 'No token' });
+ // Replace your sam-debug endpoint with this working version:
+
+if (req.method === 'GET' && req.query.test === 'sam-debug') {
+  const replicateToken = process.env.REPLICATE_API_TOKEN;
+  if (!replicateToken) return res.status(400).json({ error: 'No token' });
+  
+  const replicate = new Replicate({ auth: replicateToken });
+  
+  try {
+    console.log('Testing SAM with known working image...');
     
-    const replicate = new Replicate({ auth: replicateToken });
-    
-    try {
-      console.log('Testing SAM with Replicate example image...');
-      
-      // Use the exact example from Replicate's documentation
-      const testOutput = await replicate.run(
-        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
-        {
-          input: {
-            image: "https://replicate.delivery/pbxt/KWXwiyLFKXnhxYPvd9w5mbGnxJGkfLpWeXMfKPRIVtaVSXhIA/cats.webp",
-            input_points: [[340, 250]],
-            input_labels: [1],
-            multimask_output: false
-          }
+    // Use a simple working image URL from Replicate's examples
+    const testOutput = await replicate.run(
+      "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
+      {
+        input: {
+          image: "https://replicate.delivery/pbxt/IJEPmgAlL2zNBNDoRRKFegTEcxnlRhoQxlNjPHSZEy0pSIKn/gg_bridge.jpeg",
+          input_points: [[640, 360]],  // Center of typical image
+          input_labels: [1],
+          multimask_output: false
         }
-      );
+      }
+    );
+    
+    // Comprehensive analysis
+    let analysis = {
+      success: true,
+      rawOutput: testOutput,
+      outputType: typeof testOutput,
+    };
+    
+    // Check if it's a string (URL)
+    if (typeof testOutput === 'string') {
+      analysis.isURL = testOutput.startsWith('http');
+      analysis.urlPreview = testOutput;
       
-      // Comprehensive analysis of the output
-      let analysis = {
-        success: true,
-        rawOutput: testOutput,
-        type: typeof testOutput,
-        isNull: testOutput === null,
-        isUndefined: testOutput === undefined
-      };
+      // THIS IS WHAT WE WANT - A URL TO THE MASK!
+      return res.status(200).json({
+        ...analysis,
+        message: "SAM returned a URL! This is the mask image.",
+        nextStep: "Fetch this URL to get the mask PNG"
+      });
+    }
+    
+    // Check if it's an object
+    if (testOutput && typeof testOutput === 'object') {
+      analysis.keys = Object.keys(testOutput);
       
-      if (typeof testOutput === 'string') {
-        analysis.stringInfo = {
-          length: testOutput.length,
-          isURL: testOutput.startsWith('http'),
-          preview: testOutput.substring(0, 200)
-        };
-      } else if (Array.isArray(testOutput)) {
-        analysis.arrayInfo = {
-          length: testOutput.length,
-          firstItemType: testOutput.length > 0 ? typeof testOutput[0] : null,
-          firstItem: testOutput.length > 0 ? testOutput[0] : null
-        };
-      } else if (testOutput && typeof testOutput === 'object') {
-        analysis.objectInfo = {
-          keys: Object.keys(testOutput),
-          hasIndividualMasks: 'individual_masks' in testOutput,
-          hasCombinedMask: 'combined_mask' in testOutput,
-          hasMasks: 'masks' in testOutput
-        };
-        
-        // Check each property
-        for (const key of Object.keys(testOutput)) {
-          analysis.objectInfo[`${key}_type`] = typeof testOutput[key];
-          if (Array.isArray(testOutput[key])) {
-            analysis.objectInfo[`${key}_length`] = testOutput[key].length;
-            if (testOutput[key].length > 0) {
-              analysis.objectInfo[`${key}_first_item`] = testOutput[key][0];
-            }
-          }
+      // Check for empty objects
+      let hasEmptyObjects = false;
+      for (const key of Object.keys(testOutput)) {
+        if (typeof testOutput[key] === 'object' && Object.keys(testOutput[key]).length === 0) {
+          hasEmptyObjects = true;
         }
       }
       
-      return res.status(200).json(analysis);
+      analysis.hasEmptyObjects = hasEmptyObjects;
+      analysis.details = {};
       
-    } catch (error) {
-      return res.status(500).json({ 
-        error: error.message,
-        details: error.response ? error.response.data : null
+      // Analyze each property
+      for (const key of Object.keys(testOutput)) {
+        analysis.details[key] = {
+          type: typeof testOutput[key],
+          isArray: Array.isArray(testOutput[key]),
+          length: Array.isArray(testOutput[key]) ? testOutput[key].length : null
+        };
+      }
+    }
+    
+    return res.status(200).json(analysis);
+    
+  } catch (error) {
+    // Check if it's a rate limit error
+    if (error.message && error.message.includes('429')) {
+      return res.status(429).json({ 
+        error: 'Rate limited. Please wait a few minutes before trying again.',
+        details: error.message
       });
     }
+    
+    return res.status(500).json({ 
+      error: error.message,
+      tip: 'Make sure your Replicate API token is valid'
+    });
   }
+}
+
+// Alternative test using SAM-1 which has clearer output
+if (req.method === 'GET' && req.query.test === 'sam1-simple') {
+  const replicateToken = process.env.REPLICATE_API_TOKEN;
+  if (!replicateToken) return res.status(400).json({ error: 'No token' });
+  
+  const replicate = new Replicate({ auth: replicateToken });
+  
+  try {
+    // Use SAM-1 with simpler API
+    const output = await replicate.run(
+      "cjwbw/segment-anything:b4c09a84d97d1af4ce607d18e23dc53b8cf12f0ad49b209c9f306e2c1b98daeb",
+      {
+        input: {
+          image: "https://replicate.delivery/pbxt/nuI8bIMh6JnsVqJMm5lSvkOUZxVHaZHwGdUxWZpMD5wcInNB/img3.jpg",
+          point_coords: "500,375",
+          point_labels: "1"
+        }
+      }
+    );
+    
+    return res.status(200).json({
+      success: true,
+      model: "SAM-1",
+      outputType: typeof output,
+      isURL: typeof output === 'string' && output.startsWith('http'),
+      output: output,
+      message: typeof output === 'string' ? "Success! SAM-1 returns a direct URL to the mask" : "Check the output format"
+    });
+    
+  } catch (error) {
+    return res.status(500).json({ 
+      error: error.message,
+      model: "SAM-1"
+    });
+  }
+}
   
   // Test SAM-1 which might have clearer output
   if (req.method === 'GET' && req.query.test === 'sam1-test') {
