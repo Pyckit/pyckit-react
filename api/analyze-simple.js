@@ -1,44 +1,42 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 
-// Add this at the very top of your analyze-simple.js file, right after the imports:
-const CODE_VERSION = "v2-fixed-debug-endpoints";
+// Use LRU cache with memory limits and TTL
+const LRU = require('lru-cache');
+const maskCache = new LRU({
+  max: 500, // max 500 items
+  ttl: 1000 * 60 * 30, // 30 min TTL
+  updateAgeOnGet: true
+});
 
-// Try to load canvas, but don't fail if it's not available
-let canvasAvailable = false;
-try {
-  require.resolve('canvas');
-  canvasAvailable = true;
-} catch (e) {
-  console.log('Canvas not available, using fallback methods');
-}
-
-// SAM version caching
-let cachedSAMVersion = null;
-const SAM_VERSION_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-let lastVersionCheck = 0;
-
-async function getSAMVersion(replicate) {
-  const now = Date.now();
+// Detect MIME type from base64 magic bytes
+function detectMimeType(base64) {
+  const signatures = {
+    '/9j/': 'image/jpeg',
+    'iVBORw0KGgo': 'image/png',
+    'R0lGODlh': 'image/gif',
+    'UklGR': 'image/webp'
+  };
   
-  if (cachedSAMVersion && (now - lastVersionCheck) < SAM_VERSION_CACHE_DURATION) {
-    return cachedSAMVersion;
+  for (const [sig, mime] of Object.entries(signatures)) {
+    if (base64.startsWith(sig)) return mime;
   }
   
-  try {
-    const model = await replicate.models.get("meta", "sam-2");
-    cachedSAMVersion = model.latest_version.id;
-    lastVersionCheck = now;
-    console.log('Updated SAM version:', cachedSAMVersion);
-    return cachedSAMVersion;
-  } catch (error) {
-    console.error('Failed to fetch latest SAM version:', error);
-    return "fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83";
-  }
+  return 'image/jpeg'; // default fallback
 }
 
+// Robust image dimensions getter for all formats
 function getImageDimensions(base64) {
   const buffer = Buffer.from(base64, 'base64');
+  
+  // PNG dimensions
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) {
+    const width = buffer.readUInt32BE(16);
+    const height = buffer.readUInt32BE(20);
+    return { width, height };
+  }
+  
+  // JPEG dimensions
   if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
     let offset = 2;
     let block_length = buffer[offset] * 256 + buffer[offset + 1];
@@ -55,7 +53,31 @@ function getImageDimensions(base64) {
       block_length = buffer[offset] * 256 + buffer[offset + 1];
     }
   }
+  
+  // WebP dimensions
+  if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    const width = buffer.readUInt16LE(26) + 1;
+    const height = buffer.readUInt16LE(28) + 1;
+    return { width, height };
+  }
+  
+  // Default fallback
+  console.warn('Could not detect image dimensions, using defaults');
   return { width: 1024, height: 1024 };
+}
+
+// Simple hash function for cache keys
+function hashImage(base64) {
+  let hash = 0;
+  for (let i = 0; i < Math.min(base64.length, 1000); i++) {
+    hash = ((hash << 5) - hash) + base64.charCodeAt(i);
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+}
+
+function getCacheKey(imageHash, x, y) {
+  return `${imageHash}-${x}-${y}`;
 }
 
 // Helper to check if an object is actually empty
@@ -63,190 +85,39 @@ function isEmptyObject(obj) {
   return obj && typeof obj === 'object' && Object.keys(obj).length === 0;
 }
 
-// Helper to handle rate limiting and server errors with backoff
-async function retryWithBackoff(fn, maxRetries = 3) {
+// Retry with exponential backoff and better error handling
+async function retryWithBackoff(fn, maxRetries = 2, initialDelay = 1000) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error) {
-      // Handle 502 Bad Gateway errors with a 30s wait
-      if (error.message.includes('502') && i < maxRetries - 1) {
-        console.log(`Server error (502). Waiting 30s before retry ${i + 1}/${maxRetries}`);
-        await new Promise(resolve => setTimeout(resolve, 30000)); // 30 second wait
+      // Don't retry on server errors
+      if (error.message.includes('502') || error.message.includes('503')) {
+        throw new Error('SAM service temporarily unavailable');
       }
-      // Handle rate limiting (429)
-      else if (error.message.includes('429') && i < maxRetries - 1) {
-        const retryMatch = error.message.match(/\"retry_after\":(\d+)/);
-        const retryAfter = retryMatch ? parseInt(retryMatch[1]) : 7;
-        const waitTime = (retryAfter + 1) * 1000;
+      
+      // Don't retry on timeout
+      if (error.message.includes('timeout')) {
+        throw new Error('SAM request timed out');
+      }
+      
+      // Retry on rate limits with proper backoff
+      if (error.message.includes('429') && i < maxRetries - 1) {
+        const retryMatch = error.message.match(/"retry_after":(\d+)/);
+        const retryAfter = retryMatch ? parseInt(retryMatch[1]) : 5;
+        const waitTime = Math.min(retryAfter * 1000, 10000); // Max 10 seconds
         
         console.log(`Rate limited. Waiting ${waitTime}ms before retry ${i + 1}/${maxRetries}`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-      } 
-      // Re-throw if we've reached max retries or it's not a retryable error
-      else {
+      } else {
         throw error;
       }
     }
   }
 }
 
-// Process SAM output to extract mask information
-async function processSAMOutput(output, imageDimensions) {
-  console.log('Processing SAM output, type:', typeof output);
-  
-  // SAM-2 returns an object with URLs!
-  if (output && typeof output === 'object') {
-    console.log('SAM returned object with keys:', Object.keys(output));
-    
-    // Check for individual_masks (array of URLs)
-    if (output.individual_masks && Array.isArray(output.individual_masks)) {
-      console.log(`Found ${output.individual_masks.length} individual mask URLs`);
-      
-      // Return the first individual mask URL
-      if (output.individual_masks.length > 0 && typeof output.individual_masks[0] === 'string') {
-        return {
-          type: 'url',
-          maskUrl: output.individual_masks[0],
-          allMasks: output.individual_masks
-        };
-      }
-    }
-    
-    // Check for combined_mask (single URL)
-    if (output.combined_mask && typeof output.combined_mask === 'string') {
-      console.log('Found combined mask URL');
-      return {
-        type: 'url',
-        maskUrl: output.combined_mask
-      };
-    }
-    
-    // Check for direct masks property
-    if (output.masks && typeof output.masks === 'string') {
-      return {
-        type: 'url',
-        maskUrl: output.masks
-      };
-    }
-  }
-  
-  // Direct URL string (SAM-1 style)
-  if (typeof output === 'string' && output.startsWith('http')) {
-    console.log('SAM returned direct URL');
-    return {
-      type: 'url',
-      maskUrl: output
-    };
-  }
-  
-  console.log('Could not determine SAM output format');
-  return null;
-  if (Array.isArray(output)) {
-    console.log('SAM returned array, length:', output.length);
-    
-    // Check if it's URLs
-    if (output.length > 0 && typeof output[0] === 'string' && output[0].startsWith('http')) {
-      return {
-        type: 'url',
-        data: output[0],
-        maskUrl: output[0]
-      };
-    }
-    
-    // Check if it's mask array data
-    if (output.length === imageDimensions.width * imageDimensions.height) {
-      console.log('SAM returned flat mask array');
-      return {
-        type: 'array',
-        data: output,
-        dimensions: imageDimensions
-      };
-    }
-    
-    // Check if it's nested array (2D)
-    if (Array.isArray(output[0])) {
-      console.log('SAM returned 2D mask array');
-      const flatArray = output.flat();
-      return {
-        type: 'array',
-        data: flatArray,
-        dimensions: { width: output[0].length, height: output.length }
-      };
-    }
-  }
-  
-  // Case 3: Object with masks property
-  if (output && typeof output === 'object') {
-    console.log('SAM returned object with keys:', Object.keys(output));
-    
-    // Check for various mask properties
-    const maskKeys = ['masks', 'mask', 'segmentation', 'individual_masks', 'combined_mask'];
-    
-    for (const key of maskKeys) {
-      if (output[key]) {
-        console.log(`Found masks in ${key} property`);
-        
-        // Recursively process the masks
-        if (Array.isArray(output[key]) && output[key].length > 0) {
-          // Check if they're empty objects
-          const firstMask = output[key][0];
-          if (typeof firstMask === 'object' && Object.keys(firstMask).length === 0) {
-            console.log(`${key} contains empty objects - checking for file URLs`);
-            continue;
-          }
-          
-          // Process first valid mask
-          return processSAMOutput(output[key][0], imageDimensions);
-        } else if (typeof output[key] === 'string' || Array.isArray(output[key])) {
-          return processSAMOutput(output[key], imageDimensions);
-        }
-      }
-    }
-    
-    // Check if the output itself is the mask data
-    if (output.data && Array.isArray(output.data)) {
-      return {
-        type: 'array',
-        data: output.data,
-        dimensions: output.shape || imageDimensions
-      };
-    }
-  }
-  
-  console.log('Could not determine SAM output format');
-  return null;
-}
-
-// Convert mask data to image based on type
-async function convertMaskToImage(maskInfo, originalImageBase64) {
-  const { type, maskUrl } = maskInfo || {};
-  
-  if (type === 'url' && maskUrl) {
-    // We already have a URL to the mask image!
-    console.log('SAM provided mask URL:', maskUrl);
-    
-    // Option 1: Return the URL directly (frontend will handle it)
-    return maskUrl;
-    
-    // Option 2: Fetch and convert to base64 (uncomment if needed)
-    /*
-    try {
-      const response = await fetch(maskUrl);
-      const buffer = await response.buffer();
-      return `data:image/png;base64,${buffer.toString('base64')}`;
-    } catch (error) {
-      console.error('Failed to fetch mask:', error);
-      return maskUrl; // Return URL as fallback
-    }
-    */
-  }
-  
-  return null;
-}
-
-// Updated SAM processing with proper output handling
-async function processWithSAMEnhanced(item, imageBase64, imageDimensions, replicate, imageHash, mimeType) {
+// Process with SAM using the VIDEO model for point-based segmentation
+async function processWithSAM(item, imageBase64, imageDimensions, replicate, imageHash, mimeType) {
   const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
   const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
@@ -267,7 +138,7 @@ async function processWithSAMEnhanced(item, imageBase64, imageDimensions, replic
   }
   
   try {
-    console.log(`Processing ${item.name} with SAM-2-VIDEO (enhanced) at point [${centerX}, ${centerY}]`);
+    console.log(`Processing ${item.name} with SAM-2-VIDEO at point [${centerX}, ${centerY}]`);
     
     // Generate multiple points for better segmentation
     const points = [];
@@ -282,77 +153,81 @@ async function processWithSAMEnhanced(item, imageBase64, imageDimensions, replic
     frames.push("0");
     
     // Add additional foreground points for better coverage
-    // Slightly offset from center but still inside the object
-    const offsetX = boxWidth * 0.2;
-    const offsetY = boxHeight * 0.2;
+    const offsetX = boxWidth * 0.15;
+    const offsetY = boxHeight * 0.15;
     
-    // Top-left interior point
-    points.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
-    labels.push("1");
-    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
-    frames.push("0");
+    // Additional interior points
+    if (boxWidth > 50 && boxHeight > 50) {
+      points.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
+      labels.push("1");
+      objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
+      frames.push("0");
+      
+      points.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
+      labels.push("1");
+      objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
+      frames.push("0");
+    }
     
-    // Bottom-right interior point
-    points.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
-    labels.push("1");
-    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
-    frames.push("0");
+    // Add background exclusion points
+    const bgOffset = Math.max(boxWidth, boxHeight) * 0.7;
     
-    // Add background exclusion points around the object
-    // These help SAM understand what NOT to include
-    const bgOffset = Math.max(boxWidth, boxHeight) * 0.8;
+    // Background points around the object
+    const bgPoints = [
+      [Math.max(10, centerX - bgOffset), centerY], // Left
+      [Math.min(imageDimensions.width - 10, centerX + bgOffset), centerY], // Right
+    ];
     
-    // Background point to the left
-    const leftBgX = Math.max(10, centerX - bgOffset);
-    points.push(`[${Math.round(leftBgX)},${centerY}]`);
-    labels.push("0"); // 0 = background
-    objectIds.push("background");
-    frames.push("0");
-    
-    // Background point to the right
-    const rightBgX = Math.min(imageDimensions.width - 10, centerX + bgOffset);
-    points.push(`[${Math.round(rightBgX)},${centerY}]`);
-    labels.push("0");
-    objectIds.push("background");
-    frames.push("0");
+    bgPoints.forEach(([x, y]) => {
+      points.push(`[${Math.round(x)},${Math.round(y)}]`);
+      labels.push("0"); // 0 = background
+      objectIds.push("background");
+      frames.push("0");
+    });
     
     console.log('Using points:', points.join(','));
     console.log('With labels:', labels.join(','));
     
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('SAM request timed out')), 25000)
+      setTimeout(() => reject(new Error('SAM request timed out')), 25000) // 25s for video model
     );
     
     const samPromise = retryWithBackoff(async () => {
+      // USE SAM-2-VIDEO MODEL FOR POINT-BASED SEGMENTATION!
       return await replicate.run(
         "meta/sam-2-video:c6810eaa22a03713a02be84a95b506dd94dc90e0bc6ef4cc95e03b837713e275",
         {
           input: {
+            // Video input accepts single images too!
             video: `data:${mimeType};base64,${imageBase64}`,
+            // Comma-separated string of coordinates
             click_coordinates: points.join(','),
+            // Labels: 1 = foreground, 0 = background
             click_labels: labels.join(','),
+            // Object IDs
             click_object_ids: objectIds.join(','),
+            // Frame numbers (0 for static image)
             click_frames: frames.join(',')
           }
         }
       );
     }, 2, 2000);
     
-    // Log late errors
+    // Log late errors even after timeout
     samPromise.catch(err => {
-      console.warn(`⚠️ Late SAM error for ${item.name}:`, err.message);
+      console.warn(`⚠️ Late SAM error after timeout for ${item.name}:`, err.message);
     });
     
+    // Race between SAM and timeout
     const output = await Promise.race([samPromise, timeoutPromise]);
     
-    console.log('SAM-2-video enhanced output:', output);
+    console.log('SAM-2-video output:', typeof output, output ? Object.keys(output) : 'null');
     
-    // Extract mask URL
+    // Extract mask URL from video model output
     let maskUrl = null;
     
     if (output && output.individual_masks && Array.isArray(output.individual_masks)) {
       // Find the mask for our object (not the background)
-      // It should be the first one since we defined our object points first
       for (let i = 0; i < output.individual_masks.length; i++) {
         const mask = output.individual_masks[i];
         if (mask && typeof mask === 'string' && mask.startsWith('http')) {
@@ -363,42 +238,41 @@ async function processWithSAMEnhanced(item, imageBase64, imageDimensions, replic
       }
     }
     
-    if (!maskUrl && output && output.combined_mask && typeof output.combined_mask === 'string') {
+    if (!maskUrl && output && output.combined_mask && typeof output.combined_mask === 'string' && output.combined_mask.startsWith('http')) {
       maskUrl = output.combined_mask;
       console.log(`Using combined mask for ${item.name}`);
     }
     
-    if (maskUrl && maskUrl.startsWith('http')) {
+    if (!maskUrl && typeof output === 'string' && output.startsWith('http')) {
+      maskUrl = output;
+      console.log(`Direct URL mask for ${item.name}`);
+    }
+    
+    if (maskUrl) {
       // Cache the result
       maskCache.set(cacheKey, maskUrl);
       
-      console.log(`Successfully got enhanced mask for ${item.name}`);
+      console.log(`Successfully got mask for ${item.name} using SAM-2-video: ${maskUrl}`);
       return {
         ...item,
         hasSegmentation: true,
         segmentationMask: maskUrl,
-        maskFormat: 'url',
-        segmentationMethod: 'sam-2-video-enhanced'
+        maskFormat: 'url'
       };
+    } else {
+      console.warn(`SAM-2-video returned invalid mask format for ${item.name}:`, output);
     }
     
   } catch (error) {
-    console.error(`SAM enhanced processing error for ${item.name}:`, error.message);
+    console.error(`SAM processing error for ${item.name}:`, error.message);
   }
   
   return {
     ...item,
     hasSegmentation: false,
     requiresFallback: true,
-    segmentationError: 'SAM processing failed'
+    segmentationError: 'SAM processing failed - use fallback'
   };
-}
-
-// Also update the getSAMVersion function to handle the video model:
-async function getSAMVersion(replicate) {
-  // For sam-2-video, we'll use a fixed version that we know works
-  // The video model version is different from the image model
-  return "c6810eaa22a03713a02be84a95b506dd94dc90e0bc6ef4cc95e03b837713e275";
 }
 
 module.exports = async function handler(req, res) {
@@ -410,292 +284,39 @@ module.exports = async function handler(req, res) {
   
   if (req.method === 'OPTIONS') return res.status(200).end();
   
-  // Test endpoint
-  if (req.method === 'GET' && req.query.test === 'sam') {
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
-    
+  // Test endpoint for quick debugging
+  if (req.method === 'GET' && req.query.test === 'health') {
     return res.status(200).json({ 
-      version: CODE_VERSION,
-      hasToken: !!replicateToken,
-      tokenPrefix: replicateToken ? replicateToken.substring(0, 10) + '...' : 'NO TOKEN',
+      status: 'healthy',
+      cache: { size: maskCache.size, maxSize: maskCache.max },
       timestamp: new Date().toISOString()
     });
-  }
-  
-  // Critical debug endpoint to understand SAM output
- // Replace your sam-debug endpoint with this working version:
-
-if (req.method === 'GET' && req.query.test === 'sam-debug') {
-  const replicateToken = process.env.REPLICATE_API_TOKEN;
-  if (!replicateToken) return res.status(400).json({ error: 'No token' });
-  
-  const replicate = new Replicate({ auth: replicateToken });
-  
-  try {
-    console.log('Testing SAM with known working image...');
-    
-    // Use a simple working image URL from Replicate's examples
-    const testOutput = await replicate.run(
-      "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
-      {
-        input: {
-          image: "https://replicate.delivery/pbxt/IJEPmgAlL2zNBNDoRRKFegTEcxnlRhoQxlNjPHSZEy0pSIKn/gg_bridge.jpeg",
-          input_points: [[640, 360]],  // Center of typical image
-          input_labels: [1],
-          multimask_output: false
-        }
-      }
-    );
-    
-    // Comprehensive analysis
-    let analysis = {
-      success: true,
-      rawOutput: testOutput,
-      outputType: typeof testOutput,
-    };
-    
-    // Check if it's a string (URL)
-    if (typeof testOutput === 'string') {
-      analysis.isURL = testOutput.startsWith('http');
-      analysis.urlPreview = testOutput;
-      
-      // THIS IS WHAT WE WANT - A URL TO THE MASK!
-      return res.status(200).json({
-        ...analysis,
-        message: "SAM returned a URL! This is the mask image.",
-        nextStep: "Fetch this URL to get the mask PNG"
-      });
-    }
-    
-    // Check if it's an object
-    if (testOutput && typeof testOutput === 'object') {
-      analysis.keys = Object.keys(testOutput);
-      
-      // Check for empty objects
-      let hasEmptyObjects = false;
-      for (const key of Object.keys(testOutput)) {
-        if (typeof testOutput[key] === 'object' && Object.keys(testOutput[key]).length === 0) {
-          hasEmptyObjects = true;
-        }
-      }
-      
-      analysis.hasEmptyObjects = hasEmptyObjects;
-      analysis.details = {};
-      
-      // Analyze each property
-      for (const key of Object.keys(testOutput)) {
-        analysis.details[key] = {
-          type: typeof testOutput[key],
-          isArray: Array.isArray(testOutput[key]),
-          length: Array.isArray(testOutput[key]) ? testOutput[key].length : null
-        };
-      }
-    }
-    
-    return res.status(200).json(analysis);
-    
-  } catch (error) {
-    // Check if it's a rate limit error
-    if (error.message && error.message.includes('429')) {
-      return res.status(429).json({ 
-        error: 'Rate limited. Please wait a few minutes before trying again.',
-        details: error.message
-      });
-    }
-    
-    return res.status(500).json({ 
-      error: error.message,
-      tip: 'Make sure your Replicate API token is valid'
-    });
-  }
-}
-
-// Alternative test using SAM-1 which has clearer output
-if (req.method === 'GET' && req.query.test === 'sam1-simple') {
-  const replicateToken = process.env.REPLICATE_API_TOKEN;
-  if (!replicateToken) return res.status(400).json({ error: 'No token' });
-  
-  const replicate = new Replicate({ auth: replicateToken });
-  
-  try {
-    // Use SAM-1 with simpler API
-    const output = await replicate.run(
-      "cjwbw/segment-anything:b4c09a84d97d1af4ce607d18e23dc53b8cf12f0ad49b209c9f306e2c1b98daeb",
-      {
-        input: {
-          image: "https://replicate.delivery/pbxt/nuI8bIMh6JnsVqJMm5lSvkOUZxVHaZHwGdUxWZpMD5wcInNB/img3.jpg",
-          point_coords: "500,375",
-          point_labels: "1"
-        }
-      }
-    );
-    
-    return res.status(200).json({
-      success: true,
-      model: "SAM-1",
-      outputType: typeof output,
-      isURL: typeof output === 'string' && output.startsWith('http'),
-      output: output,
-      message: typeof output === 'string' ? "Success! SAM-1 returns a direct URL to the mask" : "Check the output format"
-    });
-    
-  } catch (error) {
-    return res.status(500).json({ 
-      error: error.message,
-      model: "SAM-1"
-    });
-  }
-}
-  
-  // Test SAM-1 which might have clearer output
-  if (req.method === 'GET' && req.query.test === 'sam1-test') {
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
-    if (!replicateToken) return res.status(400).json({ error: 'No token' });
-    
-    const replicate = new Replicate({ auth: replicateToken });
-    
-    try {
-      console.log('Testing SAM-1...');
-      
-      const testOutput = await replicate.run(
-        "cjwbw/segment-anything:5655ee69c49e5c1e4f0a01c5f0b023c89b5483d4c75e84dcf75f2e07cd72e395",
-        {
-          input: {
-            image: "https://replicate.delivery/pbxt/KWXwiyLFKXnhxYPvd9w5mbGnxJGkfLpWeXMfKPRIVtaVSXhIA/cats.webp",
-            point_coords: "340,250",
-            point_labels: "1"
-          }
-        }
-      );
-      
-      return res.status(200).json({
-        success: true,
-        model: "SAM-1",
-        outputType: typeof testOutput,
-        isString: typeof testOutput === 'string',
-        isURL: typeof testOutput === 'string' && testOutput.startsWith('http'),
-        output: testOutput
-      });
-      
-    } catch (error) {
-      return res.status(500).json({ 
-        error: error.message,
-        model: "SAM-1"
-      });
-    }
-  }
-  
-  // Test SAM with a URL-based image
-  if (req.method === 'GET' && req.query.test === 'sam-url') {
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
-    if (!replicateToken) return res.status(400).json({ error: 'No token' });
-    
-    const replicate = new Replicate({ auth: replicateToken });
-    
-    try {
-      // Use a public test image URL
-      const testOutput = await replicate.run(
-        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
-        {
-          input: {
-            image: "https://replicate.delivery/pbxt/JL7sHpcZ4R5HnkUrbFNHLCyJO8rGNAooxyyL0N5kGb0LZWGR/test-image.jpg",
-            input_points: [[400, 300]],
-            input_labels: [1]
-          }
-        }
-      );
-      
-      return res.status(200).json({
-        success: true,
-        outputType: typeof testOutput,
-        output: testOutput,
-        isString: typeof testOutput === 'string',
-        isURL: typeof testOutput === 'string' && testOutput.startsWith('http')
-      });
-      
-    } catch (error) {
-      return res.status(500).json({ 
-        error: error.message 
-      });
-    }
-  }
-  
-  // Compare different SAM models
-  if (req.method === 'GET' && req.query.test === 'sam-compare') {
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
-    if (!replicateToken) return res.status(400).json({ error: 'No token' });
-    
-    const replicate = new Replicate({ auth: replicateToken });
-    
-    // Small test image
-    const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAABHNCSVQICAgIfAhkiAAAAFZJREFUGFdjZGBg+M9ABMiuVmeE8U9cp/3PQARwYvL5D1fAwMDAyMHBzsguKirCiM0iZmY2RhYWFkYGBgYGJiYmRjCfiYmJgRjAyMjIyMDAwMAIjB4GALosEjVILpO9AAAAAElFTkSuQmCC";
-    
-    const results = {};
-    
-    // Test SAM-2
-    try {
-      const output = await replicate.run(
-        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
-        {
-          input: {
-            image: `data:image/png;base64,${testImageBase64}`,
-            input_points: [[4, 4]],
-            input_labels: [1]
-          }
-        }
-      );
-      results.sam2 = {
-        success: true,
-        outputType: typeof output,
-        hasData: !!output && JSON.stringify(output) !== '{}',
-        preview: JSON.stringify(output).substring(0, 200)
-      };
-    } catch (e) {
-      results.sam2 = { success: false, error: e.message };
-    }
-    
-    // Add delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Test SAM-1
-    try {
-      const output = await replicate.run(
-        "daanelson/segment-anything:b4139f11fcc4160c3771e1de0d58fd73c0df109e9c460fc0e9ef9bb96fe4414e",
-        {
-          input: {
-            image: `data:image/png;base64,${testImageBase64}`,
-            x: 4,
-            y: 4
-          }
-        }
-      );
-      results.sam1 = {
-        success: true,
-        outputType: typeof output,
-        isURL: typeof output === 'string' && output.startsWith('http'),
-        preview: typeof output === 'string' ? output.substring(0, 100) : JSON.stringify(output).substring(0, 100)
-      };
-    } catch (e) {
-      results.sam1 = { success: false, error: e.message };
-    }
-    
-    return res.status(200).json(results);
   }
   
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    // Handle test mode with known working image
+    if (req.query.test === 'replicate-example') {
+      req.body = {
+        image: "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mP8/5+hnoEIwDiqkL4KAcT9GO0U4BxoAAAAAElFTkSuQmCC",
+        roomType: 'test'
+      };
+    }
+    
     const { image, roomType } = req.body;
     const geminiKey = process.env.GEMINI_API_KEY;
     const replicateToken = process.env.REPLICATE_API_TOKEN;
     
     if (!image || !geminiKey) {
-      console.error('Missing required data');
       return res.status(400).json({ success: false, error: 'Missing required data' });
     }
 
+    const mimeType = detectMimeType(image);
     const imageDimensions = getImageDimensions(image);
-    console.log('Image dimensions:', imageDimensions);
+    const imageHash = hashImage(image);
+    
+    console.log(`Image info: ${mimeType}, ${imageDimensions.width}x${imageDimensions.height}`);
     
     // Step 1: Use Gemini to identify items
     const genAI = new GoogleGenerativeAI(geminiKey);
@@ -704,33 +325,25 @@ if (req.method === 'GET' && req.query.test === 'sam1-simple') {
     const imageData = {
       inlineData: {
         data: image,
-        mimeType: "image/jpeg"
+        mimeType: mimeType
       }
     };
 
     const prompt = `Analyze this room photo and identify ALL sellable items you can see. 
-    For each item, provide ACCURATE bounding box coordinates.
+    For each item, provide ACCURATE bounding box coordinates with some padding.
     
     Return ONLY a JSON array where each object has these properties:
     - name: string (specific item name, include brand if visible)
     - value: number (estimated resale value in CAD, number only)
     - condition: string (must be: Excellent, Very Good, Good, or Fair)
-    - description: string (1-2 sentence description)
+    - description: string (1-2 sentence description for marketplace listing)
     - confidence: number (0-100 confidence score)
     - category: string (furniture, electronics, decor, clothing, books, other)
     - boundingBox: object with x, y, width, height as percentages (0-100) of image dimensions
       where x,y is the CENTER of the object, not top-left corner
+      IMPORTANT: Add 10% padding to width and height for better cropping
     
-    Example format:
-    [{
-      "name": "Yellow Armchair",
-      "value": 400,
-      "condition": "Excellent",
-      "description": "Modern mustard yellow accent chair in excellent condition",
-      "confidence": 95,
-      "category": "furniture",
-      "boundingBox": {"x": 25, "y": 60, "width": 30, "height": 40}
-    }]`;
+    Focus on items that are clearly visible and would sell for at least $20.`;
 
     console.log('Calling Gemini for object identification...');
     const result = await model.generateContent([prompt, imageData]);
@@ -739,79 +352,81 @@ if (req.method === 'GET' && req.query.test === 'sam1-simple') {
     let items;
     try {
       const jsonMatch = text.match(/\[[\s\S]*\]/);
-      items = JSON.parse(jsonMatch?.[0] || '[]');
+      if (!jsonMatch) {
+        console.warn("⚠️ Gemini response had no JSON array:", text.substring(0, 200));
+        items = [];
+      } else {
+        items = JSON.parse(jsonMatch[0]);
+      }
     } catch (e) {
       console.error('Failed to parse Gemini response:', e.message);
+      console.error('Response text:', text.substring(0, 500));
       items = [];
     }
 
     console.log(`Gemini identified ${items.length} sellable items`);
 
-    // Step 2: Process items with SAM for segmentation
+    // Step 2: Process with SAM when available
     let processedItems = [];
+    let samAvailable = false;
     
     if (replicateToken && items.length > 0) {
       console.log('Starting SAM processing for items...');
       const replicate = new Replicate({ auth: replicateToken });
       
-      try {
-        const samVersion = await getSAMVersion(replicate);
+      // Process first 3 items to conserve credits
+      const itemsToProcess = items.slice(0, 3);
+      console.log(`Processing first ${itemsToProcess.length} items to conserve credits`);
+      
+      for (let i = 0; i < itemsToProcess.length; i++) {
+        const item = itemsToProcess[i];
+        console.log(`Processing item ${i+1}/${itemsToProcess.length}: ${item.name}`);
         
-        // Process first 3 items to avoid burning through credits
-        const itemsToProcess = items.slice(0, 3);
-        console.log(`Processing first ${itemsToProcess.length} items to conserve credits`);
-        
-        for (let i = 0; i < itemsToProcess.length; i++) {
-          const item = itemsToProcess[i];
-          console.log(`Processing item ${i+1}/${itemsToProcess.length}: ${item.name}`);
+        try {
+          const result = await processWithSAM(
+            item,
+            image,
+            imageDimensions,
+            replicate,
+            imageHash,
+            mimeType
+          );
           
-          try {
-            const result = await processWithSAM(
-              item,
-              image,
-              imageDimensions,
-              replicate,
-              samVersion
-            );
-            
-            processedItems.push(result);
-            
-            // Add delay between items
-            if (i < itemsToProcess.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-            
-          } catch (itemError) {
-            console.error(`Error processing item ${i+1}:`, itemError);
-            processedItems.push({
-              ...item,
-              hasSegmentation: false,
-              segmentationError: itemError.message || 'Processing failed'
-            });
+          samAvailable = result.hasSegmentation || samAvailable;
+          processedItems.push(result);
+          
+          // Add delay between items to avoid rate limiting
+          if (i < itemsToProcess.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
-        }
-        
-        // Add remaining items without segmentation
-        for (let i = itemsToProcess.length; i < items.length; i++) {
+          
+        } catch (itemError) {
+          console.error(`Error processing item ${i+1}:`, itemError);
           processedItems.push({
-            ...items[i],
+            ...item,
             hasSegmentation: false,
-            segmentationError: 'Skipped to conserve API credits'
+            segmentationError: itemError.message || 'Processing failed',
+            requiresFallback: true
           });
         }
-        
-      } catch (error) {
-        console.error('SAM processing failed:', error);
-        processedItems = items.map(item => ({
-          ...item,
-          hasSegmentation: false,
-          segmentationError: 'SAM processing failed'
-        }));
       }
+      
+      // Add remaining items without segmentation
+      for (let i = itemsToProcess.length; i < items.length; i++) {
+        processedItems.push({
+          ...items[i],
+          hasSegmentation: false,
+          requiresFallback: true,
+          segmentationError: 'Skipped to conserve API credits'
+        });
+      }
+      
     } else {
+      // No Replicate token or no items
       processedItems = items.map(item => ({
         ...item,
         hasSegmentation: false,
+        requiresFallback: true,
         segmentationError: replicateToken ? 'No items to process' : 'Missing Replicate API token'
       }));
     }
@@ -827,8 +442,9 @@ if (req.method === 'GET' && req.query.test === 'sam1-simple') {
       hasSegmentation: item.hasSegmentation || false,
       segmentationMask: item.segmentationMask || null,
       boundingBox: item.boundingBox || { x: 50, y: 50, width: 30, height: 30 },
-      ...(item.segmentationError && { segmentationError: item.segmentationError }),
-      ...(item.maskFormat && { maskFormat: item.maskFormat })
+      requiresFallback: item.requiresFallback || false,
+      maskFormat: item.maskFormat || null,
+      ...(item.segmentationError && { segmentationError: item.segmentationError })
     }));
 
     const totalValue = processedItems.reduce((sum, i) => sum + i.value, 0);
@@ -840,13 +456,18 @@ if (req.method === 'GET' && req.query.test === 'sam1-simple') {
       success: true,
       items: processedItems,
       totalValue: Math.round(totalValue),
+      samAvailable,
+      cacheStats: {
+        size: maskCache.size,
+        hits: processedItems.filter(i => i.fromCache).length
+      },
       insights: {
         quickWins: [
           `Found ${processedItems.length} sellable items worth $${Math.round(totalValue)} total`,
           segmentedCount > 0 
-            ? `Successfully isolated ${segmentedCount} objects with professional quality` 
+            ? `${segmentedCount} items professionally isolated with AI` 
             : 'Items identified and ready for listing',
-          'Each item showcased individually for maximum appeal'
+          samAvailable ? 'Using advanced SAM-2 video model for precise isolation' : 'Ready for marketplace listings'
         ]
       }
     });
