@@ -51,6 +51,37 @@ function getImageDimensions(base64) {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to convert ReadableStream to base64
+async function streamToBase64(stream) {
+  try {
+    const chunks = [];
+    const reader = stream.getReader();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    
+    // Combine all chunks into a single Uint8Array
+    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    // Convert to base64
+    const base64 = Buffer.from(result).toString('base64');
+    return `data:image/png;base64,${base64}`;
+  } catch (error) {
+    console.error('Error converting stream to base64:', error);
+    return null;
+  }
+}
+
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called');
   
@@ -155,18 +186,36 @@ module.exports = async function handler(req, res) {
           if (output.individual_masks && Array.isArray(output.individual_masks)) {
             console.log(`Found ${output.individual_masks.length} individual masks`);
             
-            // The masks are URLs directly, not objects
-            masks = output.individual_masks.map((maskUrl, index) => ({
-              mask: maskUrl, // This should be the URL directly
-              type: 'individual',
-              index: index
-            }));
+            // Process each mask (could be a stream or URL)
+            const maskPromises = output.individual_masks.map(async (maskStream, index) => {
+              try {
+                let maskData;
+                
+                // Check if it's a ReadableStream
+                if (maskStream && typeof maskStream === 'object' && maskStream.constructor.name === 'ReadableStream') {
+                  console.log(`Converting stream ${index} to base64...`);
+                  maskData = await streamToBase64(maskStream);
+                } else if (typeof maskStream === 'string') {
+                  // Already a URL or base64
+                  maskData = maskStream;
+                } else {
+                  console.error(`Unknown mask format at index ${index}:`, typeof maskStream);
+                  return null;
+                }
+                
+                return {
+                  mask: maskData,
+                  type: 'individual',
+                  index: index
+                };
+              } catch (error) {
+                console.error(`Error processing mask ${index}:`, error);
+                return null;
+              }
+            });
             
-            // Debug: Log the actual structure
-            if (output.individual_masks.length > 0) {
-              console.log('First individual mask:', output.individual_masks[0]);
-              console.log('Type of first mask:', typeof output.individual_masks[0]);
-            }
+            // Wait for all masks to be processed
+            masks = (await Promise.all(maskPromises)).filter(mask => mask !== null);
             
           } else if (output.combined_mask) {
             console.log('Only found combined_mask, no individual masks');
