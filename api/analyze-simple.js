@@ -246,60 +246,159 @@ async function convertMaskToImage(maskInfo, originalImageBase64) {
 }
 
 // Updated SAM processing with proper output handling
-async function processWithSAM(item, imageBase64, imageDimensions, replicate, samVersion) {
+async function processWithSAMEnhanced(item, imageBase64, imageDimensions, replicate, imageHash, mimeType) {
+  const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
+  const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
+  const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
+  const boxHeight = Math.round((item.boundingBox.height / 100) * imageDimensions.height);
+  
+  // Check cache first
+  const cacheKey = getCacheKey(imageHash, centerX, centerY);
+  const cachedMask = maskCache.get(cacheKey);
+  if (cachedMask) {
+    console.log(`Using cached mask for ${item.name}`);
+    return {
+      ...item,
+      hasSegmentation: true,
+      segmentationMask: cachedMask,
+      maskFormat: 'url',
+      fromCache: true
+    };
+  }
+  
   try {
-    const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
-    const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
+    console.log(`Processing ${item.name} with SAM-2-VIDEO (enhanced) at point [${centerX}, ${centerY}]`);
     
-    console.log(`Processing ${item.name} with SAM at point [${centerX}, ${centerY}]`);
+    // Generate multiple points for better segmentation
+    const points = [];
+    const labels = [];
+    const objectIds = [];
+    const frames = [];
     
-    // Use retryWithBackoff to handle rate limiting
-    const output = await retryWithBackoff(async () => {
+    // Primary foreground point (center)
+    points.push(`[${centerX},${centerY}]`);
+    labels.push("1");
+    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
+    frames.push("0");
+    
+    // Add additional foreground points for better coverage
+    // Slightly offset from center but still inside the object
+    const offsetX = boxWidth * 0.2;
+    const offsetY = boxHeight * 0.2;
+    
+    // Top-left interior point
+    points.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
+    labels.push("1");
+    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
+    frames.push("0");
+    
+    // Bottom-right interior point
+    points.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
+    labels.push("1");
+    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
+    frames.push("0");
+    
+    // Add background exclusion points around the object
+    // These help SAM understand what NOT to include
+    const bgOffset = Math.max(boxWidth, boxHeight) * 0.8;
+    
+    // Background point to the left
+    const leftBgX = Math.max(10, centerX - bgOffset);
+    points.push(`[${Math.round(leftBgX)},${centerY}]`);
+    labels.push("0"); // 0 = background
+    objectIds.push("background");
+    frames.push("0");
+    
+    // Background point to the right
+    const rightBgX = Math.min(imageDimensions.width - 10, centerX + bgOffset);
+    points.push(`[${Math.round(rightBgX)},${centerY}]`);
+    labels.push("0");
+    objectIds.push("background");
+    frames.push("0");
+    
+    console.log('Using points:', points.join(','));
+    console.log('With labels:', labels.join(','));
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('SAM request timed out')), 25000)
+    );
+    
+    const samPromise = retryWithBackoff(async () => {
       return await replicate.run(
-        `meta/sam-2:${samVersion}`,
+        "meta/sam-2-video:c6810eaa22a03713a02be84a95b506dd94dc90e0bc6ef4cc95e03b837713e275",
         {
           input: {
-            image: `data:image/jpeg;base64,${imageBase64}`,
-            input_points: [[centerX, centerY]],
-            input_labels: [1],
-            multimask_output: false,
-            return_logits: false
+            video: `data:${mimeType};base64,${imageBase64}`,
+            click_coordinates: points.join(','),
+            click_labels: labels.join(','),
+            click_object_ids: objectIds.join(','),
+            click_frames: frames.join(',')
           }
         }
       );
+    }, 2, 2000);
+    
+    // Log late errors
+    samPromise.catch(err => {
+      console.warn(`⚠️ Late SAM error for ${item.name}:`, err.message);
     });
     
-    // Process the output
-    const maskInfo = await processSAMOutput(output, imageDimensions);
+    const output = await Promise.race([samPromise, timeoutPromise]);
     
-    if (maskInfo) {
-      const maskImage = await convertMaskToImage(maskInfo, imageBase64);
-      
-      if (maskImage) {
-        return {
-          ...item,
-          hasSegmentation: true,
-          segmentationMask: maskImage,
-          maskFormat: maskInfo.type
-        };
+    console.log('SAM-2-video enhanced output:', output);
+    
+    // Extract mask URL
+    let maskUrl = null;
+    
+    if (output && output.individual_masks && Array.isArray(output.individual_masks)) {
+      // Find the mask for our object (not the background)
+      // It should be the first one since we defined our object points first
+      for (let i = 0; i < output.individual_masks.length; i++) {
+        const mask = output.individual_masks[i];
+        if (mask && typeof mask === 'string' && mask.startsWith('http')) {
+          maskUrl = mask;
+          console.log(`Found mask at index ${i} for ${item.name}`);
+          break;
+        }
       }
     }
     
-    console.log(`Failed to get valid mask for ${item.name}`);
-    return {
-      ...item,
-      hasSegmentation: false,
-      segmentationError: 'No valid mask data'
-    };
+    if (!maskUrl && output && output.combined_mask && typeof output.combined_mask === 'string') {
+      maskUrl = output.combined_mask;
+      console.log(`Using combined mask for ${item.name}`);
+    }
+    
+    if (maskUrl && maskUrl.startsWith('http')) {
+      // Cache the result
+      maskCache.set(cacheKey, maskUrl);
+      
+      console.log(`Successfully got enhanced mask for ${item.name}`);
+      return {
+        ...item,
+        hasSegmentation: true,
+        segmentationMask: maskUrl,
+        maskFormat: 'url',
+        segmentationMethod: 'sam-2-video-enhanced'
+      };
+    }
     
   } catch (error) {
-    console.error(`SAM processing error for ${item.name}:`, error);
-    return {
-      ...item,
-      hasSegmentation: false,
-      segmentationError: error.message
-    };
+    console.error(`SAM enhanced processing error for ${item.name}:`, error.message);
   }
+  
+  return {
+    ...item,
+    hasSegmentation: false,
+    requiresFallback: true,
+    segmentationError: 'SAM processing failed'
+  };
+}
+
+// Also update the getSAMVersion function to handle the video model:
+async function getSAMVersion(replicate) {
+  // For sam-2-video, we'll use a fixed version that we know works
+  // The video model version is different from the image model
+  return "c6810eaa22a03713a02be84a95b506dd94dc90e0bc6ef4cc95e03b837713e275";
 }
 
 module.exports = async function handler(req, res) {
