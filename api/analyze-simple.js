@@ -335,7 +335,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
 }
 
 module.exports = async function handler(req, res) {
-  console.log('analyze-simple function called - VERSION 2 WITH TOKEN FIX');
+  console.log('analyze-simple function called - VERSION 3 WITH DIRECT TOKEN FIX');
   
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -457,6 +457,7 @@ module.exports = async function handler(req, res) {
       for (let i = 0; i < itemsToProcess.length; i++) {
         const item = itemsToProcess[i];
         console.log(`Processing item ${i+1}/${itemsToProcess.length}: ${item.name}`);
+        console.log('Token check before processWithSAM:', replicateToken ? 'Token exists' : 'Token missing');
         
         try {
           const result = await processWithSAM(
