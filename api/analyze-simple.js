@@ -101,7 +101,7 @@ async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfT
   console.log(`Processing ${item.name} with HF SAM at point [${centerX}, ${centerY}]`);
   
   try {
-    // For mask-generation pipeline
+    // The Inference API expects just the image as input
     const response = await fetch(
       "https://api-inference.huggingface.co/models/facebook/sam-vit-base",
       {
@@ -111,9 +111,10 @@ async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfT
         },
         method: "POST",
         body: JSON.stringify({
-          inputs: {
-            image: `data:${mimeType};base64,${imageBase64}`,
-            points: [[centerX, centerY]]
+          inputs: `data:${mimeType};base64,${imageBase64}`, // Direct image input
+          parameters: {
+            points: [[centerX, centerY]],
+            labels: [1]
           }
         }),
       }
