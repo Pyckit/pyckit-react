@@ -464,7 +464,8 @@ module.exports = async function handler(req, res) {
             imageDimensions,
             replicate,
             imageHash,
-            mimeType
+            mimeType,
+            replicateToken
           );
           
           samAvailable = result.hasSegmentation || samAvailable;
