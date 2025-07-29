@@ -159,7 +159,7 @@ module.exports = async function handler(req, res) {
     console.log(`Image info: ${mimeType}, ${dimensions.width}x${dimensions.height}`);
 
     const genAI = new GoogleGenerativeAI(geminiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const imageData = {
       inlineData: {
