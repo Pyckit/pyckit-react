@@ -2,6 +2,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Replicate = require('replicate');
 const LRU = require('lru-cache');
 
+// In-memory cache for segmentation masks
 const maskCache = new LRU({
   max: 500,
   ttl: 1000 * 60 * 30,
@@ -68,9 +69,8 @@ async function retryWithBackoff(fn, maxRetries = 2, delay = 2000) {
       if (msg.includes('404')) throw new Error('Model not found');
       if (msg.includes('timeout')) throw new Error('Timeout');
       if (msg.includes('429') && i < maxRetries) {
-        const wait = 9000;
-        console.log(`Rate limited. Waiting ${wait}ms before retry ${i + 1}`);
-        await new Promise(res => setTimeout(res, wait));
+        console.log(`Rate limited. Waiting 9000ms before retry ${i + 1}`);
+        await new Promise(res => setTimeout(res, 9000));
       } else {
         throw error;
       }
@@ -83,32 +83,35 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
   const centerY = Math.round((item.boundingBox.y / 100) * dimensions.height);
 
   const cacheKey = getCacheKey(imageHash, centerX, centerY);
-  const cachedMask = maskCache.get(cacheKey);
-  if (cachedMask) {
-    console.log(`Using cached mask for ${item.name}`);
+  const cached = maskCache.get(cacheKey);
+  if (cached) {
     return {
       ...item,
       hasSegmentation: true,
-      segmentationMask: cachedMask,
-      maskFormat: 'url',
+      segmentationMask: cached,
       fromCache: true
     };
   }
 
   try {
     const output = await retryWithBackoff(() =>
-      replicate.run("yuval-alaluf/sam", {
-        input: {
-          image: `data:${mimeType};base64,${imageBase64}`,
-          point_coords: [[centerX, centerY]],
-          point_labels: [1]
+      replicate.run(
+        "yuval-alaluf/sam:9222a21c181b707209ef12b5e0d7e94c994b58f01c7b2fec075d2e892362f13c",
+        {
+          input: {
+            image: `data:${mimeType};base64,${imageBase64}`,
+            point_coords: [[centerX, centerY]],
+            point_labels: [1]
+          }
         }
-      })
+      )
     );
 
     let maskUrl = null;
-    if (Array.isArray(output?.individual_masks) && typeof output.individual_masks[0] === 'string') {
-      maskUrl = output.individual_masks[0];
+    if (Array.isArray(output) && typeof output[0] === 'string') {
+      maskUrl = output[0];
+    } else if (typeof output === 'string') {
+      maskUrl = output;
     }
 
     if (maskUrl) {
@@ -119,8 +122,6 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
         segmentationMask: maskUrl,
         maskFormat: 'url'
       };
-    } else {
-      console.warn(`No mask found for ${item.name}`);
     }
   } catch (err) {
     console.error(`SAM error for ${item.name}:`, err.message);
@@ -129,7 +130,6 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
   return {
     ...item,
     hasSegmentation: false,
-    requiresFallback: true,
     segmentationError: 'Segmentation failed'
   };
 }
@@ -164,36 +164,36 @@ module.exports = async function handler(req, res) {
     const imageData = {
       inlineData: {
         data: image,
-        mimeType
+        mimeType: mimeType
       }
     };
 
     const prompt = `You are an expert in home decor resale. Analyze the provided image and return a JSON array containing details of sellable furniture or decor items identified in the image.
 
 Each item in the array must include:
-- name (string): A clear, descriptive name for the item
-- estimatedValue (number): Estimated resale value in CAD
-- condition (string): "Excellent", "Very Good", "Good", or "Fair"
-- description (string): Short summary of features/materials/style
-- confidence (number): 0–100 certainty of identification
-- category (string): Such as "Furniture", "Lighting", etc.
-- boundingBox (object): x, y, width, height — all % of image dimensions, with x/y as item center.
+- name
+- estimatedValue (CAD)
+- condition ("Excellent", "Very Good", "Good", or "Fair")
+- description
+- confidence (0-100)
+- category (e.g., "Furniture", "Lighting", "Art")
+- boundingBox: { x, y, width, height } in percentages (0-100)
 
-Omit any item you're unsure of. Return only JSON.`;
+Ensure the output is valid JSON.`;
 
     const result = await model.generateContent([prompt, imageData]);
-    let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
+    let text = (await result.response).text().replace(/```json\n?|```/g, '').trim();
 
     let items = [];
     try {
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        items = JSON.parse(jsonMatch[0]);
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) {
+        items = JSON.parse(match[0]);
       } else {
-        console.warn("No valid JSON array found");
+        console.warn("⚠️ No valid JSON array found");
       }
     } catch (err) {
-      console.error('Gemini response parse error:', err.message);
+      console.error("Gemini JSON parse error:", err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
@@ -201,12 +201,10 @@ Omit any item you're unsure of. Return only JSON.`;
     const replicate = replicateToken ? new Replicate({ auth: replicateToken }) : null;
 
     const processedItems = await Promise.all(
-      items.slice(0, 3).map(async (item) => {
-        if (!replicate) {
-          return { ...item, hasSegmentation: false, requiresFallback: true };
-        }
-        return await processWithSAM(item, image, dimensions, replicate, imageHash, mimeType);
-      })
+      items.slice(0, 3).map(item => replicate
+        ? processWithSAM(item, image, dimensions, replicate, imageHash, mimeType)
+        : { ...item, hasSegmentation: false, segmentationError: 'Replicate unavailable' }
+      )
     );
 
     const allItems = [
@@ -214,7 +212,6 @@ Omit any item you're unsure of. Return only JSON.`;
       ...items.slice(3).map(item => ({
         ...item,
         hasSegmentation: false,
-        requiresFallback: true,
         segmentationError: 'Skipped to conserve credits'
       }))
     ];
@@ -233,23 +230,23 @@ Omit any item you're unsure of. Return only JSON.`;
       },
       insights: {
         quickWins: [
-          `Found ${allItems.length} sellable items worth $${Math.round(totalValue)} total`,
+          `Found ${allItems.length} sellable items worth ~$${Math.round(totalValue)} CAD`,
           segmentedCount > 0
             ? `${segmentedCount} items segmented with SAM`
-            : 'Segmentation skipped or unavailable'
+            : 'Segmentation skipped or failed'
         ]
       }
     });
-  } catch (error) {
-    console.error('Handler error:', error.message);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error('Handler error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 };
 
 module.exports.config = {
   api: {
     bodyParser: {
-      sizeLimit: '50mb',
+      sizeLimit: '50mb'
     }
   }
 };
