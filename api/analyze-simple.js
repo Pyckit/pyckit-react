@@ -1,5 +1,4 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const Replicate = require('replicate');
 
 // Use LRU cache with memory limits and TTL
 const LRU = require('lru-cache');
@@ -80,55 +79,10 @@ function getCacheKey(imageHash, x, y) {
   return `${imageHash}-${x}-${y}`;
 }
 
-// Helper to check if an object is actually empty
-function isEmptyObject(obj) {
-  return obj && typeof obj === 'object' && Object.keys(obj).length === 0;
-}
-
-// Retry with exponential backoff and better error handling
-async function retryWithBackoff(fn, maxRetries = 2, initialDelay = 1000) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      console.error(`Attempt ${i + 1} failed:`, error.message);
-      
-      // Don't retry on 404 errors - model not found
-      if (error.message.includes('404')) {
-        throw new Error('Model not found - check model name');
-      }
-      
-      // Don't retry on server errors
-      if (error.message.includes('502') || error.message.includes('503')) {
-        throw new Error('SAM service temporarily unavailable');
-      }
-      
-      // Don't retry on timeout
-      if (error.message.includes('timeout')) {
-        throw new Error('SAM request timed out');
-      }
-      
-      // Retry on rate limits with proper backoff
-      if (error.message.includes('429') && i < maxRetries - 1) {
-        const retryMatch = error.message.match(/"retry_after":(\d+)/);
-        const retryAfter = retryMatch ? parseInt(retryMatch[1]) : 5;
-        const waitTime = Math.min(retryAfter * 1000, 10000); // Max 10 seconds
-        
-        console.log(`Rate limited. Waiting ${waitTime}ms before retry ${i + 1}/${maxRetries}`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      } else {
-        throw error;
-      }
-    }
-  }
-}
-
-// Process with SAM using the VIDEO model for point-based segmentation
-async function processWithSAM(item, imageBase64, imageDimensions, replicate, imageHash, mimeType, replicateToken) {
+// Process with SAM using Hugging Face
+async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfToken, imageHash, mimeType) {
   const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
-  const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
-  const boxHeight = Math.round((item.boundingBox.height / 100) * imageDimensions.height);
   
   // Check cache first
   const cacheKey = getCacheKey(imageHash, centerX, centerY);
@@ -139,219 +93,98 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
       ...item,
       hasSegmentation: true,
       segmentationMask: cachedMask,
-      maskFormat: 'url',
+      maskFormat: 'base64',
       fromCache: true
     };
   }
   
+  console.log(`Processing ${item.name} with HF SAM-2 at point [${centerX}, ${centerY}]`);
+  
   try {
-    console.log(`Processing ${item.name} with SAM-2 at point [${centerX}, ${centerY}]`);
-    
-    // Generate multiple points for better segmentation
-    const pointCoords = [];
-    const pointLabels = [];
-    const objectIds = [];
-    const frames = [];
-    
-    // Primary foreground point (center)
-    pointCoords.push(`[${centerX},${centerY}]`);
-    pointLabels.push("1");
-    objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
-    frames.push("0");
-    
-    // Add additional foreground points for better coverage
-    const offsetX = boxWidth * 0.15;
-    const offsetY = boxHeight * 0.15;
-    
-    // Additional interior points
-    if (boxWidth > 50 && boxHeight > 50) {
-      pointCoords.push(`[${Math.round(centerX - offsetX)},${Math.round(centerY - offsetY)}]`);
-      pointLabels.push("1");
-      objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
-      frames.push("0");
-      
-      pointCoords.push(`[${Math.round(centerX + offsetX)},${Math.round(centerY + offsetY)}]`);
-      pointLabels.push("1");
-      objectIds.push(`obj_${item.name.replace(/\s+/g, '_')}`);
-      frames.push("0");
-    }
-    
-    // Add background exclusion points
-    const bgOffset = Math.max(boxWidth, boxHeight) * 0.7;
-    
-    // Background points around the object
-    const bgPoints = [
-      [Math.max(10, centerX - bgOffset), centerY], // Left
-      [Math.min(imageDimensions.width - 10, centerX + bgOffset), centerY], // Right
+    // Add multiple points for better segmentation
+    const points = [
+      [centerX, centerY], // Center point
     ];
     
-    bgPoints.forEach(([x, y]) => {
-      pointCoords.push(`[${Math.round(x)},${Math.round(y)}]`);
-      pointLabels.push("0"); // 0 = background
-      objectIds.push("background");
-      frames.push("0");
-    });
+    // Add corner points if object is large enough
+    const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
+    const boxHeight = Math.round((item.boundingBox.height / 100) * imageDimensions.height);
     
-    console.log('Using points:', pointCoords.join(','));
-    console.log('With labels:', pointLabels.join(','));
+    if (boxWidth > 50 && boxHeight > 50) {
+      const offsetX = boxWidth * 0.3;
+      const offsetY = boxHeight * 0.3;
+      points.push(
+        [Math.round(centerX - offsetX), Math.round(centerY - offsetY)],
+        [Math.round(centerX + offsetX), Math.round(centerY + offsetY)]
+      );
+    }
     
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('SAM request timed out')), 30000) // 30s timeout
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/facebook/sam2-hiera-large",
+      {
+        headers: {
+          Authorization: `Bearer ${hfToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        body: JSON.stringify({
+          inputs: `data:${mimeType};base64,${imageBase64}`,
+          parameters: {
+            input_points: points,
+            input_labels: points.map(() => 1), // All foreground points
+          }
+        }),
+      }
     );
     
-    // Pass replicateToken to the retry function
-    const samPromise = retryWithBackoff(async () => {
-      console.log('Using Replicate model: meta/sam-2 via direct API');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      const errorMessage = errorData?.error || `HTTP ${response.status}`;
       
-      try {
-        // Convert string coordinates to proper format
-        const inputPoints = [];
-        const inputLabels = [];
-        
-        pointCoords.forEach((coord, idx) => {
-          const [x, y] = coord.replace(/[\[\]]/g, '').split(',').map(Number);
-          inputPoints.push([x, y]);
-          inputLabels.push(parseInt(pointLabels[idx]));
-        });
-        
-        // Make direct API call to bypass SDK issues
-        const response = await fetch('https://api.replicate.com/v1/predictions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Token ${replicateToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            version: 'b88dc2ea8f814e5f4af2bac79f2414079800b5035b065d4eab99c857ab67e125', // meta/sam-2 latest
-            input: {
-              image: `data:${mimeType};base64,${imageBase64}`,
-              point_coords: inputPoints,
-              point_labels: inputLabels,
-              use_m2m: false
-            }
-          })
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API call failed: ${response.status} - ${errorText}`);
-        }
-
-        const prediction = await response.json();
-        console.log('Prediction created:', prediction.id, 'Status:', prediction.status);
-        
-        // Poll for completion with progressive backoff
-        let result = prediction;
-        let pollCount = 0;
-        const maxPolls = 25; // Maximum 25 polls
-        
-        while (result.status === 'starting' || result.status === 'processing') {
-          pollCount++;
-          if (pollCount > maxPolls) {
-            throw new Error('Prediction took too long to start');
-          }
-          
-          // Use progressive backoff: start fast, then slow down
-          const waitTime = pollCount < 5 ? 1000 : 2000; // 1s for first 5 polls, then 2s
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          
-          const pollResponse = await fetch(result.urls.get, {
-            headers: {
-              'Authorization': `Token ${replicateToken}`,
-            }
-          });
-          
-          if (!pollResponse.ok) {
-            throw new Error(`Poll failed: ${pollResponse.status}`);
-          }
-          
-          result = await pollResponse.json();
-          console.log('Prediction status:', result.status);
-        }
-        
-        if (result.status === 'failed') {
-          throw new Error(`Prediction failed: ${result.error || 'Unknown error'}`);
-        }
-        
-        // Check if prediction got stuck
-        if (result.status === 'starting' && pollCount >= maxPolls) {
-          console.warn(`Prediction ${result.id} stuck in starting state after ${pollCount} polls`);
-          throw new Error('Prediction stuck in starting state - Replicate may be overloaded');
-        }
-        
-        console.log('Prediction completed successfully');
-        return result.output;
-      } catch (error) {
-        console.error('API call error:', error.message);
-        throw error;
+      // Check for model loading
+      if (errorMessage.includes('loading')) {
+        console.log('HF model is loading, will retry...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Retry once
+        return processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfToken, imageHash, mimeType);
       }
-    }, 2, 2000);
-    
-    // Log late errors even after timeout
-    samPromise.catch(err => {
-      console.warn(`⚠️ Late SAM error after timeout for ${item.name}:`, err.message);
-    });
-    
-    // Race between SAM and timeout
-    const output = await Promise.race([samPromise, timeoutPromise]);
-    
-    console.log('SAM-2 output:', typeof output, output ? Object.keys(output) : 'null');
-    
-    // Extract mask URL from model output
-    let maskUrl = null;
-    
-    // For SAM-2-VIDEO, check various output formats
-    if (output && output.individual_masks && Array.isArray(output.individual_masks)) {
-      // Find the mask for our object (not the background)
-      for (let i = 0; i < output.individual_masks.length; i++) {
-        const mask = output.individual_masks[i];
-        if (mask && typeof mask === 'string' && mask.startsWith('http')) {
-          maskUrl = mask;
-          console.log(`Found mask at index ${i} for ${item.name}`);
-          break;
-        }
-      }
+      
+      throw new Error(`HF API error: ${errorMessage}`);
     }
     
-    if (!maskUrl && output && output.combined_mask && typeof output.combined_mask === 'string' && output.combined_mask.startsWith('http')) {
-      maskUrl = output.combined_mask;
-      console.log(`Using combined mask for ${item.name}`);
-    }
+    const result = await response.json();
     
-    if (!maskUrl && typeof output === 'string' && output.startsWith('http')) {
-      maskUrl = output;
-      console.log(`Direct URL mask for ${item.name}`);
-    }
-    
-    if (maskUrl) {
+    // HF SAM returns base64 PNG mask
+    if (result && (result.masks || result.mask || typeof result === 'string')) {
+      const maskData = result.masks?.[0] || result.mask || result;
+      
       // Cache the result
-      maskCache.set(cacheKey, maskUrl);
+      maskCache.set(cacheKey, maskData);
       
-      console.log(`Successfully got mask for ${item.name} using SAM-2: ${maskUrl.substring(0, 50)}...`);
+      console.log(`Successfully got mask for ${item.name} from Hugging Face`);
       return {
         ...item,
         hasSegmentation: true,
-        segmentationMask: maskUrl,
-        maskFormat: 'url'
+        segmentationMask: maskData,
+        maskFormat: 'base64'
       };
-    } else {
-      console.warn(`SAM-2 returned invalid mask format for ${item.name}:`, output);
     }
     
+    throw new Error('No mask returned from HF');
+    
   } catch (error) {
-    console.error(`SAM processing error for ${item.name}:`, error.message);
+    console.error(`HF SAM error for ${item.name}:`, error.message);
+    return {
+      ...item,
+      hasSegmentation: false,
+      segmentationError: error.message,
+      requiresFallback: true
+    };
   }
-  
-  return {
-    ...item,
-    hasSegmentation: false,
-    requiresFallback: true,
-    segmentationError: 'SAM processing failed - use fallback'
-  };
 }
 
 module.exports = async function handler(req, res) {
-  console.log('analyze-simple function called - VERSION 3.1 WITH TIMEOUT FIXES');
+  console.log('analyze-simple function called - VERSION 4.0 WITH HUGGING FACE SAM-2');
   
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -364,24 +197,17 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ 
       status: 'healthy',
       cache: { size: maskCache.size, maxSize: maskCache.max },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      samProvider: 'huggingface'
     });
   }
   
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    // Handle test mode with known working image
-    if (req.query.test === 'replicate-example') {
-      req.body = {
-        image: "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mP8/5+hnoEIwDiqkL4KAcT9GO0U4BxoAAAAAElFTkSuQmCC",
-        roomType: 'test'
-      };
-    }
-    
     const { image, roomType } = req.body;
     const geminiKey = process.env.GEMINI_API_KEY;
-    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    const hfToken = process.env.HF_TOKEN;
     
     if (!image || !geminiKey) {
       return res.status(400).json({ success: false, error: 'Missing required data' });
@@ -458,40 +284,37 @@ module.exports = async function handler(req, res) {
 
     console.log(`Gemini identified ${items.length} sellable items`);
 
-    // Step 2: Process with SAM when available
+    // Step 2: Process with SAM using Hugging Face
     let processedItems = [];
     let samAvailable = false;
     
-    if (replicateToken && items.length > 0) {
-      console.log('Starting SAM processing for items...');
-      const replicate = new Replicate({ auth: replicateToken });
+    if (hfToken && items.length > 0) {
+      console.log('Starting SAM processing with Hugging Face...');
       
-      // Process only first item to avoid timeouts during high load
-      const itemsToProcess = items.slice(0, 1);
-      console.log(`Processing first ${itemsToProcess.length} item(s) to conserve credits and avoid timeouts`);
+      // Can process more items with HF's better reliability
+      const itemsToProcess = items.slice(0, 3);
+      console.log(`Processing first ${itemsToProcess.length} items with HF SAM-2`);
       
       for (let i = 0; i < itemsToProcess.length; i++) {
         const item = itemsToProcess[i];
         console.log(`Processing item ${i+1}/${itemsToProcess.length}: ${item.name}`);
-        console.log('Token check before processWithSAM:', replicateToken ? 'Token exists' : 'Token missing');
         
         try {
-          const result = await processWithSAM(
+          const result = await processWithSAMHuggingFace(
             item,
             image,
             imageDimensions,
-            replicate,
+            hfToken,
             imageHash,
-            mimeType,
-            replicateToken
+            mimeType
           );
           
           samAvailable = result.hasSegmentation || samAvailable;
           processedItems.push(result);
           
-          // Add delay between items to avoid rate limiting
+          // Small delay to respect rate limits
           if (i < itemsToProcess.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
           
         } catch (itemError) {
@@ -511,17 +334,17 @@ module.exports = async function handler(req, res) {
           ...items[i],
           hasSegmentation: false,
           requiresFallback: true,
-          segmentationError: 'Skipped to conserve API credits'
+          segmentationError: 'Skipped to conserve API calls'
         });
       }
       
     } else {
-      // No Replicate token or no items
+      // No HF token or no items
       processedItems = items.map(item => ({
         ...item,
         hasSegmentation: false,
         requiresFallback: true,
-        segmentationError: replicateToken ? 'No items to process' : 'Missing Replicate API token'
+        segmentationError: hfToken ? 'No items to process' : 'Missing Hugging Face token'
       }));
     }
 
@@ -551,6 +374,7 @@ module.exports = async function handler(req, res) {
       items: processedItems,
       totalValue: Math.round(totalValue),
       samAvailable,
+      samProvider: 'huggingface',
       cacheStats: {
         size: maskCache.size,
         hits: processedItems.filter(i => i.fromCache).length
@@ -561,7 +385,7 @@ module.exports = async function handler(req, res) {
           segmentedCount > 0 
             ? `${segmentedCount} items professionally isolated with AI` 
             : 'Items identified and ready for listing',
-          samAvailable ? 'Using SAM-2 model for precise isolation' : 'Ready for marketplace listings'
+          samAvailable ? 'Using Hugging Face SAM-2 for precise isolation' : 'Ready for marketplace listings'
         ]
       }
     });
