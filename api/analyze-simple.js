@@ -79,7 +79,7 @@ function getCacheKey(imageHash, x, y) {
   return `${imageHash}-${x}-${y}`;
 }
 
-// Process with SAM using Hugging Face
+// Process with SAM using Hugging Face (corrected version)
 async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfToken, imageHash, mimeType) {
   const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
@@ -98,29 +98,12 @@ async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfT
     };
   }
   
-  console.log(`Processing ${item.name} with HF SAM-2 at point [${centerX}, ${centerY}]`);
+  console.log(`Processing ${item.name} with HF SAM at point [${centerX}, ${centerY}]`);
   
   try {
-    // Add multiple points for better segmentation
-    const points = [
-      [centerX, centerY], // Center point
-    ];
-    
-    // Add corner points if object is large enough
-    const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
-    const boxHeight = Math.round((item.boundingBox.height / 100) * imageDimensions.height);
-    
-    if (boxWidth > 50 && boxHeight > 50) {
-      const offsetX = boxWidth * 0.3;
-      const offsetY = boxHeight * 0.3;
-      points.push(
-        [Math.round(centerX - offsetX), Math.round(centerY - offsetY)],
-        [Math.round(centerX + offsetX), Math.round(centerY + offsetY)]
-      );
-    }
-    
+    // For mask-generation pipeline
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/facebook/sam2-hiera-large",
+      "https://api-inference.huggingface.co/models/facebook/sam-vit-base",
       {
         headers: {
           Authorization: `Bearer ${hfToken}`,
@@ -128,23 +111,29 @@ async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfT
         },
         method: "POST",
         body: JSON.stringify({
-          inputs: `data:${mimeType};base64,${imageBase64}`,
-          parameters: {
-            input_points: points,
-            input_labels: points.map(() => 1), // All foreground points
+          inputs: {
+            image: `data:${mimeType};base64,${imageBase64}`,
+            points: [[centerX, centerY]]
           }
         }),
       }
     );
     
     if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText };
+      }
+      
       const errorMessage = errorData?.error || `HTTP ${response.status}`;
       
       // Check for model loading
-      if (errorMessage.includes('loading')) {
-        console.log('HF model is loading, will retry...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+      if (errorMessage.includes('loading') || errorMessage.includes('currently loading')) {
+        console.log('HF model is loading, waiting 20 seconds...');
+        await new Promise(resolve => setTimeout(resolve, 20000));
         // Retry once
         return processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfToken, imageHash, mimeType);
       }
@@ -154,10 +143,37 @@ async function processWithSAMHuggingFace(item, imageBase64, imageDimensions, hfT
     
     const result = await response.json();
     
-    // HF SAM returns base64 PNG mask
-    if (result && (result.masks || result.mask || typeof result === 'string')) {
-      const maskData = result.masks?.[0] || result.mask || result;
+    // Parse the response - HF returns various formats
+    let maskData = null;
+    
+    // Check if it's the mask-generation pipeline format
+    if (result.masks && Array.isArray(result.masks)) {
+      // Find the mask closest to our point
+      let bestMask = null;
+      let bestScore = -1;
       
+      for (const maskObj of result.masks) {
+        if (maskObj.score > bestScore) {
+          bestScore = maskObj.score;
+          bestMask = maskObj.mask;
+        }
+      }
+      maskData = bestMask;
+    }
+    // Check if it's direct mask format
+    else if (Array.isArray(result)) {
+      maskData = result[0];
+    }
+    // Check for single mask
+    else if (result.mask) {
+      maskData = result.mask;
+    }
+    // Fallback to raw result
+    else if (typeof result === 'string') {
+      maskData = result;
+    }
+    
+    if (maskData) {
       // Cache the result
       maskCache.set(cacheKey, maskData);
       
