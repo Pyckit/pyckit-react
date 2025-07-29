@@ -199,6 +199,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
       setTimeout(() => reject(new Error('SAM request timed out')), 15000) // 15s timeout
     );
     
+    // Pass replicateToken to the retry function
     const samPromise = retryWithBackoff(async () => {
       console.log('Using Replicate model: meta/sam-2 via direct API');
       
