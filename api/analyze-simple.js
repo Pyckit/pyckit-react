@@ -196,7 +196,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
     console.log('With labels:', pointLabels.join(','));
     
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('SAM request timed out')), 15000) // 15s timeout
+      setTimeout(() => reject(new Error('SAM request timed out')), 30000) // 30s timeout
     );
     
     // Pass replicateToken to the retry function
@@ -240,10 +240,20 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
         const prediction = await response.json();
         console.log('Prediction created:', prediction.id, 'Status:', prediction.status);
         
-        // Poll for completion
+        // Poll for completion with progressive backoff
         let result = prediction;
+        let pollCount = 0;
+        const maxPolls = 25; // Maximum 25 polls
+        
         while (result.status === 'starting' || result.status === 'processing') {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          pollCount++;
+          if (pollCount > maxPolls) {
+            throw new Error('Prediction took too long to start');
+          }
+          
+          // Use progressive backoff: start fast, then slow down
+          const waitTime = pollCount < 5 ? 1000 : 2000; // 1s for first 5 polls, then 2s
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           
           const pollResponse = await fetch(result.urls.get, {
             headers: {
@@ -261,6 +271,12 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
         
         if (result.status === 'failed') {
           throw new Error(`Prediction failed: ${result.error || 'Unknown error'}`);
+        }
+        
+        // Check if prediction got stuck
+        if (result.status === 'starting' && pollCount >= maxPolls) {
+          console.warn(`Prediction ${result.id} stuck in starting state after ${pollCount} polls`);
+          throw new Error('Prediction stuck in starting state - Replicate may be overloaded');
         }
         
         console.log('Prediction completed successfully');
@@ -335,7 +351,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
 }
 
 module.exports = async function handler(req, res) {
-  console.log('analyze-simple function called - VERSION 3 WITH DIRECT TOKEN FIX');
+  console.log('analyze-simple function called - VERSION 3.1 WITH TIMEOUT FIXES');
   
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -450,9 +466,9 @@ module.exports = async function handler(req, res) {
       console.log('Starting SAM processing for items...');
       const replicate = new Replicate({ auth: replicateToken });
       
-      // Process first 3 items to conserve credits
-      const itemsToProcess = items.slice(0, 3);
-      console.log(`Processing first ${itemsToProcess.length} items to conserve credits`);
+      // Process only first item to avoid timeouts during high load
+      const itemsToProcess = items.slice(0, 1);
+      console.log(`Processing first ${itemsToProcess.length} item(s) to conserve credits and avoid timeouts`);
       
       for (let i = 0; i < itemsToProcess.length; i++) {
         const item = itemsToProcess[i];
@@ -475,7 +491,7 @@ module.exports = async function handler(req, res) {
           
           // Add delay between items to avoid rate limiting
           if (i < itemsToProcess.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
           
         } catch (itemError) {
