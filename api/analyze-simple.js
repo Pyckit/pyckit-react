@@ -24,7 +24,10 @@ function detectMimeType(base64) {
 function getImageDimensions(base64) {
   const buffer = Buffer.from(base64, 'base64');
   if (buffer[0] === 0x89 && buffer[1] === 0x50) {
-    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20)
+    };
   }
   if (buffer[0] === 0xff && buffer[1] === 0xd8) {
     let offset = 2;
@@ -64,9 +67,9 @@ async function retryWithBackoff(fn, maxRetries = 2, delay = 2000) {
       const msg = error.message || '';
       if (msg.includes('404')) throw new Error('Model not found');
       if (msg.includes('timeout')) throw new Error('Timeout');
-      if (msg.includes('503') && i < maxRetries) {
-        const wait = delay * (i + 1);
-        console.log(`503 error. Waiting ${wait}ms before retry ${i + 1}`);
+      if (msg.includes('429') && i < maxRetries) {
+        const wait = 9000;
+        console.log(`Rate limited. Waiting ${wait}ms before retry ${i + 1}`);
         await new Promise(res => setTimeout(res, wait));
       } else {
         throw error;
@@ -78,6 +81,7 @@ async function retryWithBackoff(fn, maxRetries = 2, delay = 2000) {
 async function processWithSAM(item, imageBase64, dimensions, replicate, imageHash, mimeType) {
   const centerX = Math.round((item.boundingBox.x / 100) * dimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * dimensions.height);
+
   const cacheKey = getCacheKey(imageHash, centerX, centerY);
   const cachedMask = maskCache.get(cacheKey);
   if (cachedMask) {
@@ -93,7 +97,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
 
   try {
     const output = await retryWithBackoff(() =>
-      replicate.run("yuval-alaluf/sam-video:1e3795145d3bc2f3b5b8db90a23272801976505d97c1f273a76c8ff13c6c1b5a", {
+      replicate.run("yuval-alaluf/sam", {
         input: {
           image: `data:${mimeType};base64,${imageBase64}`,
           point_coords: [[centerX, centerY]],
@@ -103,15 +107,12 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
     );
 
     let maskUrl = null;
-    if (output?.individual_masks?.length && typeof output.individual_masks[0] === 'string') {
+    if (Array.isArray(output?.individual_masks) && typeof output.individual_masks[0] === 'string') {
       maskUrl = output.individual_masks[0];
-    } else if (typeof output === 'string' && output.startsWith('http')) {
-      maskUrl = output;
     }
 
     if (maskUrl) {
       maskCache.set(cacheKey, maskUrl);
-      console.log(`Mask for ${item.name}: ${maskUrl}`);
       return {
         ...item,
         hasSegmentation: true,
@@ -119,7 +120,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
         maskFormat: 'url'
       };
     } else {
-      console.warn(`No valid mask for ${item.name}`);
+      console.warn(`No mask found for ${item.name}`);
     }
   } catch (err) {
     console.error(`SAM error for ${item.name}:`, err.message);
@@ -135,6 +136,7 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
 
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called');
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -153,10 +155,11 @@ module.exports = async function handler(req, res) {
     const mimeType = detectMimeType(image);
     const dimensions = getImageDimensions(image);
     const imageHash = hashImage(image);
+
     console.log(`Image info: ${mimeType}, ${dimensions.width}x${dimensions.height}`);
 
     const genAI = new GoogleGenerativeAI(geminiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     const imageData = {
       inlineData: {
@@ -165,41 +168,20 @@ module.exports = async function handler(req, res) {
       }
     };
 
-    const prompt = `
-You are an expert in home decor resale. Analyze the provided image and return a JSON array containing details of sellable furniture or decor items visible in the image.
+    const prompt = `You are an expert in home decor resale. Analyze the provided image and return a JSON array containing details of sellable furniture or decor items identified in the image.
 
 Each item in the array must include:
-- name (string): A clear, descriptive name for the item (e.g., "Vintage Oak Coffee Table").
-- value (number): Estimated resale value in CAD, based on current market trends.
-- condition (string): One of: "Excellent", "Very Good", "Good", or "Fair".
-- description (string): A concise sentence highlighting unique features, style, or materials (e.g., "A sleek lamp with a brass base").
-- confidence (number): Certainty score between 0 and 100.
-- category (string): One of: "Furniture", "Lighting", "Art", "Textiles", "Decor", or "Other".
-- boundingBox (object): Keys x, y, width, height (all 0–100 % of image dimensions). x/y represent the center of the item.
+- name (string): A clear, descriptive name for the item
+- estimatedValue (number): Estimated resale value in CAD
+- condition (string): "Excellent", "Very Good", "Good", or "Fair"
+- description (string): Short summary of features/materials/style
+- confidence (number): 0–100 certainty of identification
+- category (string): Such as "Furniture", "Lighting", etc.
+- boundingBox (object): x, y, width, height — all % of image dimensions, with x/y as item center.
 
-**Context**: The image is a high-resolution, naturally lit photo showing decor like chairs, tables, lamps, or artwork. Identify items that are clearly visible and would appeal to modern buyers based on their style (e.g., mid-century, boho), materials (e.g., wood, metal, glass), and function.
+Omit any item you're unsure of. Return only JSON.`;
 
-**Example Output**:
-[
-  {
-    "name": "Vintage Brass Floor Lamp",
-    "value": 150,
-    "condition": "Good",
-    "description": "A tall floor lamp with a brass finish and a slightly faded shade.",
-    "confidence": 85,
-    "category": "Lighting",
-    "boundingBox": { "x": 40, "y": 50, "width": 15, "height": 25 }
-  }
-]
-
-**Instructions**:
-- Only include items with estimated resale value of at least $20 CAD.
-- If an item's identity is unclear, omit it rather than guessing.
-- Focus on accuracy and relevance.
-- Return ONLY a valid JSON array. Do not include any explanation or markdown.
-`;
-
-    const result = await retryWithBackoff(() => model.generateContent([prompt, imageData]));
+    const result = await model.generateContent([prompt, imageData]);
     let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
 
     let items = [];
@@ -208,10 +190,10 @@ Each item in the array must include:
       if (jsonMatch) {
         items = JSON.parse(jsonMatch[0]);
       } else {
-        console.warn("⚠️ No valid JSON array found");
+        console.warn("No valid JSON array found");
       }
     } catch (err) {
-      console.error('Gemini parse error:', err.message);
+      console.error('Gemini response parse error:', err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
@@ -219,7 +201,7 @@ Each item in the array must include:
     const replicate = replicateToken ? new Replicate({ auth: replicateToken }) : null;
 
     const processedItems = await Promise.all(
-      items.slice(0, 3).map(async item => {
+      items.slice(0, 3).map(async (item) => {
         if (!replicate) {
           return { ...item, hasSegmentation: false, requiresFallback: true };
         }
@@ -237,7 +219,7 @@ Each item in the array must include:
       }))
     ];
 
-    const totalValue = allItems.reduce((sum, i) => sum + (parseFloat(i.value) || 0), 0);
+    const totalValue = allItems.reduce((sum, i) => sum + (parseFloat(i.estimatedValue) || 0), 0);
     const segmentedCount = allItems.filter(i => i.hasSegmentation).length;
 
     res.status(200).json({
