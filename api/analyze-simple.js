@@ -334,7 +334,7 @@ async function processWithSAM(item, imageBase64, imageDimensions, replicate, ima
 }
 
 module.exports = async function handler(req, res) {
-  console.log('analyze-simple function called');
+  console.log('analyze-simple function called - VERSION 2 WITH TOKEN FIX');
   
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -465,7 +465,7 @@ module.exports = async function handler(req, res) {
             replicate,
             imageHash,
             mimeType,
-            replicateToken
+            replicateToken  // Pass the token here
           );
           
           samAvailable = result.hasSegmentation || samAvailable;
