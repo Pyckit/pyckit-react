@@ -124,7 +124,7 @@ async function retryWithBackoff(fn, maxRetries = 2, initialDelay = 1000) {
 }
 
 // Process with SAM using the VIDEO model for point-based segmentation
-async function processWithSAM(item, imageBase64, imageDimensions, replicate, imageHash, mimeType) {
+async function processWithSAM(item, imageBase64, imageDimensions, replicate, imageHash, mimeType, replicateToken) {
   const centerX = Math.round((item.boundingBox.x / 100) * imageDimensions.width);
   const centerY = Math.round((item.boundingBox.y / 100) * imageDimensions.height);
   const boxWidth = Math.round((item.boundingBox.width / 100) * imageDimensions.width);
@@ -467,7 +467,7 @@ module.exports = async function handler(req, res) {
             replicate,
             imageHash,
             mimeType,
-            replicateToken  // Pass the token here
+            replicateToken
           );
           
           samAvailable = result.hasSegmentation || samAvailable;
