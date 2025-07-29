@@ -101,7 +101,8 @@ async function processWithSAM(item, imageBase64, dimensions, replicate, imageHas
           input: {
             image: `data:${mimeType};base64,${imageBase64}`,
             point_coords: [[centerX, centerY]],
-            point_labels: [1]
+            point_labels: [1],
+            target_age: "default"
           }
         }
       )
