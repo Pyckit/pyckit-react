@@ -1,13 +1,8 @@
-// analyze-simple.js — Production Crop Version with Calgary Localization
-
+// analyze-simple.js
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
-
-const MIN_PRICE_CAD = 5;
-const userLocation = "Calgary, Canada";
-const currency = "CAD";
+const sharp = require('sharp');
 
 function detectMimeType(base64) {
   const signatures = {
@@ -22,37 +17,42 @@ function detectMimeType(base64) {
   return 'image/jpeg';
 }
 
-function calculateCropBox(item, imageWidth, imageHeight, paddingFactor = 0.15) {
-  const centerX = (item.boundingBox.x / 100) * imageWidth;
-  const centerY = (item.boundingBox.y / 100) * imageHeight;
-  let boxWidth = (item.boundingBox.width / 100) * imageWidth;
-  let boxHeight = (item.boundingBox.height / 100) * imageHeight;
+function adjustCropToSquare(x1, y1, x2, y2, imgWidth, imgHeight, padding = 0.15) {
+  let width = x2 - x1;
+  let height = y2 - y1;
 
-  boxWidth *= (1 + paddingFactor);
-  boxHeight *= (1 + paddingFactor);
+  // Add padding
+  const padW = width * padding;
+  const padH = height * padding;
+  x1 = Math.max(0, x1 - padW);
+  y1 = Math.max(0, y1 - padH);
+  x2 = Math.min(imgWidth, x2 + padW);
+  y2 = Math.min(imgHeight, y2 + padH);
 
-  const x1 = Math.max(0, Math.round(centerX - boxWidth / 2));
-  const y1 = Math.max(0, Math.round(centerY - boxHeight / 2));
-  const x2 = Math.min(imageWidth, Math.round(centerX + boxWidth / 2));
-  const y2 = Math.min(imageHeight, Math.round(centerY + boxHeight / 2));
+  // Force square crop
+  width = x2 - x1;
+  height = y2 - y1;
+  const size = Math.max(width, height);
+  const centerX = x1 + width / 2;
+  const centerY = y1 + height / 2;
+  x1 = Math.max(0, centerX - size / 2);
+  y1 = Math.max(0, centerY - size / 2);
+  x2 = Math.min(imgWidth, x1 + size);
+  y2 = Math.min(imgHeight, y1 + size);
 
-  return { x1, y1, x2, y2, width: x2 - x1, height: y2 - y1 };
+  return [Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)];
 }
 
-async function cropAndSaveImage(base64Image, cropBox, outputFilename) {
-  const imageBuffer = Buffer.from(base64Image, 'base64');
-  const outputPath = path.join('/tmp', outputFilename);
-
-  await sharp(imageBuffer)
+async function cropImage(base64, cropCoords, outPath) {
+  const buffer = Buffer.from(base64, 'base64');
+  await sharp(buffer)
     .extract({
-      left: cropBox.x1,
-      top: cropBox.y1,
-      width: cropBox.width,
-      height: cropBox.height
+      left: cropCoords[0],
+      top: cropCoords[1],
+      width: cropCoords[2] - cropCoords[0],
+      height: cropCoords[3] - cropCoords[1]
     })
-    .toFile(outputPath);
-
-  return outputPath;
+    .toFile(outPath);
 }
 
 module.exports = async function handler(req, res) {
@@ -61,6 +61,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', '*');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -69,7 +70,7 @@ module.exports = async function handler(req, res) {
     const geminiKey = process.env.GEMINI_API_KEY;
 
     if (!image || !geminiKey) {
-      return res.status(400).json({ error: 'Missing image or Gemini API key' });
+      return res.status(400).json({ error: 'Missing image or Gemini key' });
     }
 
     const mimeType = detectMimeType(image);
@@ -78,28 +79,26 @@ module.exports = async function handler(req, res) {
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
+    const location = "Calgary, Canada";
     const prompt = `
-You are an expert in home resale valuation for ${userLocation}.
-Analyze the provided image and identify ALL sellable items worth at least ${MIN_PRICE_CAD} ${currency}.
-For each item, return:
+You are an expert in resale valuations. Analyze this image and identify all sellable items.
 
-- name: Clear descriptive name including brand if visible.
-- estimatedValue: Estimated resale value in ${currency} based on current ${userLocation} market trends.
-- condition: One of Excellent, Very Good, Good, Fair — based on visible wear, materials, and quality.
-- description: Short compelling listing description with key details and appeal.
-- confidence: Identification confidence (0-100).
-- category: Furniture, Lighting, Art, Decor, Electronics, or Other.
-- boundingBox: { x, y, width, height } as percentages of image dimensions (center-based).
-- lightingWarning: If lighting, visibility, or clutter may affect selling potential, give a short advisory.
+For each item, return a JSON array with:
+- name
+- estimatedValue (CAD, based on ${location} market)
+- condition ("Excellent", "Very Good", "Good", "Fair")
+- description
+- confidence (0-100)
+- boundingBox (x,y,width,height in % with x/y as center)
 
-Ensure bounding boxes fully cover the object without cutting it off, with slight natural padding for a clean resale-style photo.
+Only include items worth at least $5 CAD resale.
 `;
 
     console.log('Calling Gemini for object identification...');
     const imageData = {
       inlineData: {
         data: image,
-        mimeType
+        mimeType: mimeType
       }
     };
 
@@ -113,45 +112,58 @@ Ensure bounding boxes fully cover the object without cutting it off, with slight
         items = JSON.parse(jsonMatch[0]);
       }
     } catch (err) {
-      console.error('Failed to parse Gemini output:', err.message);
+      console.error('Error parsing Gemini JSON:', err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
 
-    // Crop each detected item
-    const imageBuffer = Buffer.from(image, 'base64');
-    const metadata = await sharp(imageBuffer).metadata();
-    const croppedItems = [];
+    // Assume fixed image size for now (front-end sends this)
+    const imgWidth = 940;
+    const imgHeight = 870;
 
-    for (const item of items) {
-      // Ensure estimatedValue is a number with fallback to 0
-      item.estimatedValue = parseFloat(item.estimatedValue) || 0;
-      if (item.estimatedValue < MIN_PRICE_CAD) continue;
-
-      const cropBox = calculateCropBox(item, metadata.width, metadata.height);
-      console.log(`Cropping ${item.name}: (${cropBox.x1}, ${cropBox.y1}) → (${cropBox.x2}, ${cropBox.y2})`);
-
+    // Process crops
+    const processedItems = await Promise.all(items.map(async (item) => {
       try {
-        // Replace problematic characters with underscores
-        const safeName = item.name.replace(/[^a-zA-Z0-9_\-]/g, '_');
-        const fileName = `${safeName}.jpg`;
-        const croppedPath = await cropAndSaveImage(image, cropBox, fileName);
-        const croppedBase64 = fs.readFileSync(croppedPath).toString('base64');
+        const { boundingBox } = item;
+        if (!boundingBox) throw new Error('No bounding box');
 
-        croppedItems.push({
+        const centerX = (boundingBox.x / 100) * imgWidth;
+        const centerY = (boundingBox.y / 100) * imgHeight;
+        const boxWidth = (boundingBox.width / 100) * imgWidth;
+        const boxHeight = (boundingBox.height / 100) * imgHeight;
+
+        let x1 = centerX - boxWidth / 2;
+        let y1 = centerY - boxHeight / 2;
+        let x2 = centerX + boxWidth / 2;
+        let y2 = centerY + boxHeight / 2;
+
+        [x1, y1, x2, y2] = adjustCropToSquare(x1, y1, x2, y2, imgWidth, imgHeight, 0.20);
+
+        console.log(`Cropping ${item.name}: (${x1}, ${y1}) → (${x2}, ${y2})`);
+
+        const outFileName = `${item.name.replace(/[^a-z0-9]/gi, '_')}.jpg`;
+        const outPath = path.join('/tmp', outFileName);
+
+        await cropImage(image, [x1, y1, x2, y2], outPath);
+        const croppedBase64 = fs.readFileSync(outPath, { encoding: 'base64' });
+
+        return {
           ...item,
-          croppedImage: `data:image/jpeg;base64,${croppedBase64}`
-        });
+          image: `data:image/jpeg;base64,${croppedBase64}`
+        };
       } catch (err) {
-        console.error(`Crop failed for ${item.name}:`, err.message);
+        console.error(`Crop failed for ${item.name}: ${err.message}`);
+        return item;
       }
-    }
+    }));
+
+    const totalValue = processedItems.reduce((sum, i) => sum + (parseFloat(i.estimatedValue) || 0), 0);
 
     res.status(200).json({
       success: true,
-      location: userLocation,
-      currency,
-      items: croppedItems
+      location,
+      items: processedItems,
+      totalValue: Math.round(totalValue)
     });
 
   } catch (error) {
@@ -163,7 +175,7 @@ Ensure bounding boxes fully cover the object without cutting it off, with slight
 module.exports.config = {
   api: {
     bodyParser: {
-      sizeLimit: '50mb'
+      sizeLimit: '50mb',
     }
   }
 };
