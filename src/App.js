@@ -1045,6 +1045,8 @@ export default function App() {
   const [, setSelectedImage] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState(null);
+  const [items, setItems] = useState([]);
+  const [totalValue, setTotalValue] = useState(0);
   const fileInputRef = useRef(null);
   
   useEffect(() => {
