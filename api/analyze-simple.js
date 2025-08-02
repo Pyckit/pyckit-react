@@ -1,6 +1,59 @@
+// analyze-simple.js — Production Crop Version with Calgary Localization
+
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const sharp = require('sharp'); // For cropping images
+const sharp = require('sharp');
+const fs = require('fs');
 const path = require('path');
+
+const MIN_PRICE_CAD = 5;
+const userLocation = "Calgary, Canada";
+const currency = "CAD";
+
+function detectMimeType(base64) {
+  const signatures = {
+    '/9j/': 'image/jpeg',
+    'iVBORw0KGgo': 'image/png',
+    'R0lGODlh': 'image/gif',
+    'UklGR': 'image/webp'
+  };
+  for (const [sig, mime] of Object.entries(signatures)) {
+    if (base64.startsWith(sig)) return mime;
+  }
+  return 'image/jpeg';
+}
+
+function calculateCropBox(item, imageWidth, imageHeight, paddingFactor = 0.15) {
+  const centerX = (item.boundingBox.x / 100) * imageWidth;
+  const centerY = (item.boundingBox.y / 100) * imageHeight;
+  let boxWidth = (item.boundingBox.width / 100) * imageWidth;
+  let boxHeight = (item.boundingBox.height / 100) * imageHeight;
+
+  boxWidth *= (1 + paddingFactor);
+  boxHeight *= (1 + paddingFactor);
+
+  const x1 = Math.max(0, Math.round(centerX - boxWidth / 2));
+  const y1 = Math.max(0, Math.round(centerY - boxHeight / 2));
+  const x2 = Math.min(imageWidth, Math.round(centerX + boxWidth / 2));
+  const y2 = Math.min(imageHeight, Math.round(centerY + boxHeight / 2));
+
+  return { x1, y1, x2, y2, width: x2 - x1, height: y2 - y1 };
+}
+
+async function cropAndSaveImage(base64Image, cropBox, outputFilename) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const outputPath = path.join('/tmp', outputFilename);
+
+  await sharp(imageBuffer)
+    .extract({
+      left: cropBox.x1,
+      top: cropBox.y1,
+      width: cropBox.width,
+      height: cropBox.height
+    })
+    .toFile(outputPath);
+
+  return outputPath;
+}
 
 module.exports = async function handler(req, res) {
   console.log('analyze-simple function called - Production Crop Version');
@@ -8,43 +61,48 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader('Access-Control-Allow-Headers', '*');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { image, location = 'Toronto, Canada' } = req.body || {};
+    const { image } = req.body || {};
     const geminiKey = process.env.GEMINI_API_KEY;
 
     if (!image || !geminiKey) {
-      return res.status(400).json({ error: 'Missing image or Gemini key' });
+      return res.status(400).json({ error: 'Missing image or Gemini API key' });
     }
 
-    console.log(`Image info: image/jpeg`);
+    const mimeType = detectMimeType(image);
+    console.log(`Image info: ${mimeType}`);
+
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
-    const imageData = {
-      inlineData: { data: image, mimeType: "image/jpeg" }
-    };
-
     const prompt = `
-You are an expert in home resale value estimation.
-Analyze the provided image and return a JSON array of **all** sellable items worth >= $5 in the local resale market for ${location}.
+You are an expert in home resale valuation for ${userLocation}.
+Analyze the provided image and identify ALL sellable items worth at least ${MIN_PRICE_CAD} ${currency}.
 For each item, return:
-- name (string)
-- brand (if visible)
-- value (number in CAD)
-- condition (Excellent, Very Good, Good, or Fair)
-- description (short 1-2 sentence marketplace-ready)
-- confidence (0-100)
-- category (furniture, electronics, decor, etc.)
-- boundingBox: object with x,y,width,height in percentages (0-100), with x/y as center.
-Add 10-15% padding for better framing when cropping.
-If poor lighting or clutter may impact visibility, add "warning": "Image may need better lighting/visibility".
+
+- name: Clear descriptive name including brand if visible.
+- estimatedValue: Estimated resale value in ${currency} based on current ${userLocation} market trends.
+- condition: One of Excellent, Very Good, Good, Fair — based on visible wear, materials, and quality.
+- description: Short compelling listing description with key details and appeal.
+- confidence: Identification confidence (0-100).
+- category: Furniture, Lighting, Art, Decor, Electronics, or Other.
+- boundingBox: { x, y, width, height } as percentages of image dimensions (center-based).
+- lightingWarning: If lighting, visibility, or clutter may affect selling potential, give a short advisory.
+
+Ensure bounding boxes fully cover the object without cutting it off, with slight natural padding for a clean resale-style photo.
 `;
 
-    console.log("Calling Gemini for object identification...");
+    console.log('Calling Gemini for object identification...');
+    const imageData = {
+      inlineData: {
+        data: image,
+        mimeType
+      }
+    };
+
     const result = await model.generateContent([prompt, imageData]);
     let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
 
@@ -55,69 +113,30 @@ If poor lighting or clutter may impact visibility, add "warning": "Image may nee
         items = JSON.parse(jsonMatch[0]);
       }
     } catch (err) {
-      console.error('Gemini JSON parse error:', err.message);
+      console.error('Failed to parse Gemini output:', err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
 
+    // Crop each detected item
+    const imageBuffer = Buffer.from(image, 'base64');
+    const metadata = await sharp(imageBuffer).metadata();
     const croppedItems = [];
 
-    // Decode base64 image for sharp
-    const imgBuffer = Buffer.from(image, 'base64');
-    const imgMeta = await sharp(imgBuffer).metadata();
-    const imgW = imgMeta.width;
-    const imgH = imgMeta.height;
+    for (const item of items) {
+      if (!item.estimatedValue || item.estimatedValue < MIN_PRICE_CAD) continue;
 
-    // Clamp helper
-    function clampCropArea(x1, y1, x2, y2) {
-      x1 = Math.max(0, Math.floor(x1));
-      y1 = Math.max(0, Math.floor(y1));
-      x2 = Math.min(imgW, Math.ceil(x2));
-      y2 = Math.min(imgH, Math.ceil(y2));
-      return { x1, y1, x2, y2 };
-    }
+      const cropBox = calculateCropBox(item, metadata.width, metadata.height);
+      console.log(`Cropping ${item.name}: (${cropBox.x1}, ${cropBox.y1}) → (${cropBox.x2}, ${cropBox.y2})`);
 
-    for (let item of items) {
       try {
-        const { boundingBox } = item;
-        if (!boundingBox) continue;
-
-        const centerX = (boundingBox.x / 100) * imgW;
-        const centerY = (boundingBox.y / 100) * imgH;
-        const boxW = (boundingBox.width / 100) * imgW;
-        const boxH = (boundingBox.height / 100) * imgH;
-
-        // Add natural padding (15%)
-        const padW = boxW * 0.15;
-        const padH = boxH * 0.15;
-
-        let x1 = centerX - (boxW / 2) - padW;
-        let y1 = centerY - (boxH / 2) - padH;
-        let x2 = centerX + (boxW / 2) + padW;
-        let y2 = centerY + (boxH / 2) + padH;
-
-        // Clamp to valid image area
-        ({ x1, y1, x2, y2 } = clampCropArea(x1, y1, x2, y2));
-
-        // Skip very small crops
-        if (x2 - x1 < 20 || y2 - y1 < 20) {
-          console.warn(`Skipping tiny crop for ${item.name}`);
-          continue;
-        }
-
-        console.log(`Cropping ${item.name}: (${x1}, ${y1}) → (${x2}, ${y2})`);
-
-        const croppedBuffer = await sharp(imgBuffer)
-          .extract({ left: x1, top: y1, width: x2 - x1, height: y2 - y1 })
-          .toBuffer();
-
-        const croppedBase64 = croppedBuffer.toString('base64');
+        const croppedPath = await cropAndSaveImage(image, cropBox, `${item.name.replace(/\s+/g, '_')}.jpg`);
+        const croppedBase64 = fs.readFileSync(croppedPath).toString('base64');
 
         croppedItems.push({
           ...item,
-          crop: croppedBase64
+          croppedImage: `data:image/jpeg;base64,${croppedBase64}`
         });
-
       } catch (err) {
         console.error(`Crop failed for ${item.name}:`, err.message);
       }
@@ -125,6 +144,8 @@ If poor lighting or clutter may impact visibility, add "warning": "Image may nee
 
     res.status(200).json({
       success: true,
+      location: userLocation,
+      currency,
       items: croppedItems
     });
 
@@ -135,5 +156,9 @@ If poor lighting or clutter may impact visibility, add "warning": "Image may nee
 };
 
 module.exports.config = {
-  api: { bodyParser: { sizeLimit: '50mb' } }
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb'
+    }
+  }
 };
