@@ -1,160 +1,139 @@
-// analyze-simple.js
-// Production-ready backend for Vercel — Cropping + Local Pricing + Warnings
-
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const sharp = require("sharp");
-const path = require("path");
-const fs = require("fs");
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const sharp = require('sharp'); // For cropping images
+const path = require('path');
 
 module.exports = async function handler(req, res) {
-  console.log("analyze-simple function called - Production Crop Version");
+  console.log('analyze-simple function called - Production Crop Version');
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
-  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', '*');
 
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { image, location = "your local area" } = req.body || {};
+    const { image, location = 'Toronto, Canada' } = req.body || {};
     const geminiKey = process.env.GEMINI_API_KEY;
 
     if (!image || !geminiKey) {
-      return res.status(400).json({ error: "Missing image or Gemini key" });
+      return res.status(400).json({ error: 'Missing image or Gemini key' });
     }
 
-    // Detect MIME type
-    const mimeType = image.startsWith("/9j/") ? "image/jpeg" :
-                     image.startsWith("iVBORw0KGgo") ? "image/png" :
-                     "image/jpeg";
-
-    console.log(`Image info: ${mimeType}`);
-
-    // Prepare Gemini model
+    console.log(`Image info: image/jpeg`);
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const imageData = {
-      inlineData: {
-        data: image,
-        mimeType
-      }
+      inlineData: { data: image, mimeType: "image/jpeg" }
     };
 
-    // Prompt for detection
     const prompt = `
-You are an expert in home resale and second-hand market analysis.
-
-Analyze the provided image and return a JSON array of items you detect worth at least $5 CAD in the ${location} resale market.
-
-For each item:
-- name (specific, include brand if visible)
-- estimatedValue (number, CAD, based on resale prices in ${location})
-- condition ("Excellent", "Very Good", "Good", "Fair") based on visible wear (scratches, stains, dents, fading, etc.)
-- description (short, appealing, honest description)
+You are an expert in home resale value estimation.
+Analyze the provided image and return a JSON array of **all** sellable items worth >= $5 in the local resale market for ${location}.
+For each item, return:
+- name (string)
+- brand (if visible)
+- value (number in CAD)
+- condition (Excellent, Very Good, Good, or Fair)
+- description (short 1-2 sentence marketplace-ready)
 - confidence (0-100)
-- category (Furniture, Lighting, Electronics, Decor, Clothing, Other)
-- boundingBox (x, y, width, height) as percentages of image dimensions — x/y is the center of the item
-- visibilityWarnings (array of issues like ["poor lighting", "object partially hidden"])
-
-Important:
-- Crops should be natural, with ~10-15% padding for a realistic resale photo look.
-- Do NOT include random conditions — only based on visible signs.
-- If lighting is poor or object is hidden, still crop but add warning in visibilityWarnings.
+- category (furniture, electronics, decor, etc.)
+- boundingBox: object with x,y,width,height in percentages (0-100), with x/y as center.
+Add 10-15% padding for better framing when cropping.
+If poor lighting or clutter may impact visibility, add "warning": "Image may need better lighting/visibility".
 `;
 
     console.log("Calling Gemini for object identification...");
     const result = await model.generateContent([prompt, imageData]);
-    let text = (await result.response).text().replace(/```json\n?|\n?```/g, "").trim();
+    let text = (await result.response).text().replace(/```json\n?|\n?```/g, '').trim();
 
     let items = [];
     try {
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         items = JSON.parse(jsonMatch[0]);
-      } else {
-        console.warn("No valid JSON array found");
       }
     } catch (err) {
-      console.error("Gemini response parse error:", err.message);
+      console.error('Gemini JSON parse error:', err.message);
     }
 
     console.log(`Gemini identified ${items.length} items`);
 
-    // Prepare output directory for cropped images
-    const tmpDir = path.join("/tmp", "cropped");
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+    const croppedItems = [];
 
-    // Convert base64 image to buffer
-    const imageBuffer = Buffer.from(image, "base64");
+    // Decode base64 image for sharp
+    const imgBuffer = Buffer.from(image, 'base64');
+    const imgMeta = await sharp(imgBuffer).metadata();
+    const imgW = imgMeta.width;
+    const imgH = imgMeta.height;
 
-    // Process crops locally
-    const croppedItems = await Promise.all(items.map(async (item, index) => {
-      if (!item.boundingBox) return { ...item, cropUrl: null };
+    // Clamp helper
+    function clampCropArea(x1, y1, x2, y2) {
+      x1 = Math.max(0, Math.floor(x1));
+      y1 = Math.max(0, Math.floor(y1));
+      x2 = Math.min(imgW, Math.ceil(x2));
+      y2 = Math.min(imgH, Math.ceil(y2));
+      return { x1, y1, x2, y2 };
+    }
 
-      const { x, y, width, height } = item.boundingBox;
-
-      // Convert % to pixels
-      const imgWidth = 1024;
-      const imgHeight = 1024;
-
-      let cropWidth = Math.round((width / 100) * imgWidth);
-      let cropHeight = Math.round((height / 100) * imgHeight);
-
-      let centerX = Math.round((x / 100) * imgWidth);
-      let centerY = Math.round((y / 100) * imgHeight);
-
-      // Apply padding (10-15%)
-      cropWidth = Math.round(cropWidth * 1.15);
-      cropHeight = Math.round(cropHeight * 1.15);
-
-      // Ensure crop stays in bounds
-      const left = Math.max(0, centerX - cropWidth / 2);
-      const top = Math.max(0, centerY - cropHeight / 2);
-
+    for (let item of items) {
       try {
-        const cropPath = path.join(tmpDir, `item_${index + 1}.jpg`);
-        await sharp(imageBuffer)
-          .extract({
-            left: Math.round(left),
-            top: Math.round(top),
-            width: Math.min(cropWidth, imgWidth - left),
-            height: Math.min(cropHeight, imgHeight - top)
-          })
-          .toFile(cropPath);
+        const { boundingBox } = item;
+        if (!boundingBox) continue;
 
-        // Convert to base64 for frontend display
-        const croppedBase64 = fs.readFileSync(cropPath).toString("base64");
-        return { ...item, cropUrl: `data:image/jpeg;base64,${croppedBase64}` };
+        const centerX = (boundingBox.x / 100) * imgW;
+        const centerY = (boundingBox.y / 100) * imgH;
+        const boxW = (boundingBox.width / 100) * imgW;
+        const boxH = (boundingBox.height / 100) * imgH;
+
+        // Add natural padding (15%)
+        const padW = boxW * 0.15;
+        const padH = boxH * 0.15;
+
+        let x1 = centerX - (boxW / 2) - padW;
+        let y1 = centerY - (boxH / 2) - padH;
+        let x2 = centerX + (boxW / 2) + padW;
+        let y2 = centerY + (boxH / 2) + padH;
+
+        // Clamp to valid image area
+        ({ x1, y1, x2, y2 } = clampCropArea(x1, y1, x2, y2));
+
+        // Skip very small crops
+        if (x2 - x1 < 20 || y2 - y1 < 20) {
+          console.warn(`Skipping tiny crop for ${item.name}`);
+          continue;
+        }
+
+        console.log(`Cropping ${item.name}: (${x1}, ${y1}) → (${x2}, ${y2})`);
+
+        const croppedBuffer = await sharp(imgBuffer)
+          .extract({ left: x1, top: y1, width: x2 - x1, height: y2 - y1 })
+          .toBuffer();
+
+        const croppedBase64 = croppedBuffer.toString('base64');
+
+        croppedItems.push({
+          ...item,
+          crop: croppedBase64
+        });
+
       } catch (err) {
         console.error(`Crop failed for ${item.name}:`, err.message);
-        return { ...item, cropUrl: null, cropError: "Cropping failed" };
       }
-    }));
+    }
 
-    // Response
     res.status(200).json({
       success: true,
-      location,
-      items: croppedItems,
-      totalValue: Math.round(croppedItems.reduce((sum, i) => sum + (parseFloat(i.estimatedValue) || 0), 0)),
-      insights: {
-        quickWins: [
-          `Found ${croppedItems.length} sellable items worth $${Math.round(croppedItems.reduce((sum, i) => sum + (parseFloat(i.estimatedValue) || 0), 0))} total in ${location}`,
-          `${croppedItems.filter(i => i.visibilityWarnings?.length).length} items flagged for visibility issues`
-        ]
-      }
+      items: croppedItems
     });
 
   } catch (error) {
-    console.error("Handler error:", error.message);
+    console.error('Handler error:', error.message);
     res.status(500).json({ error: error.message });
   }
 };
 
 module.exports.config = {
-  api: {
-    bodyParser: { sizeLimit: "50mb" }
-  }
+  api: { bodyParser: { sizeLimit: '50mb' } }
 };
