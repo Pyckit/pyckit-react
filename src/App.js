@@ -402,7 +402,7 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
         </h3>
         
         <div className="item-price">
-          {item.value.toFixed(2)}
+          {(item.value ?? 0).toFixed(2)}
         </div>
         
         {item.condition && (

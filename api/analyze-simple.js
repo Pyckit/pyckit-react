@@ -124,7 +124,9 @@ Ensure bounding boxes fully cover the object without cutting it off, with slight
     const croppedItems = [];
 
     for (const item of items) {
-      if (!item.estimatedValue || item.estimatedValue < MIN_PRICE_CAD) continue;
+      // Ensure estimatedValue is a number with fallback to 0
+      item.estimatedValue = parseFloat(item.estimatedValue) || 0;
+      if (item.estimatedValue < MIN_PRICE_CAD) continue;
 
       const cropBox = calculateCropBox(item, metadata.width, metadata.height);
       console.log(`Cropping ${item.name}: (${cropBox.x1}, ${cropBox.y1}) → (${cropBox.x2}, ${cropBox.y2})`);
