@@ -17,30 +17,52 @@ function detectMimeType(base64) {
   return 'image/jpeg';
 }
 
-function adjustCropToSquare(x1, y1, x2, y2, imgWidth, imgHeight, padding = 0.15) {
-  let width = x2 - x1;
-  let height = y2 - y1;
+function getSafeCropBox(bbox, imgWidth, imgHeight) {
+  let { x, y, width, height } = bbox;
 
-  // Add padding
-  const padW = width * padding;
-  const padH = height * padding;
-  x1 = Math.max(0, x1 - padW);
-  y1 = Math.max(0, y1 - padH);
-  x2 = Math.min(imgWidth, x2 + padW);
-  y2 = Math.min(imgHeight, y2 + padH);
+  // Convert % coords to pixels if needed
+  if (width <= 1 && height <= 1) {
+    width = width * imgWidth;
+    height = height * imgHeight;
+    x = x * imgWidth;
+    y = y * imgHeight;
+  }
 
-  // Force square crop
-  width = x2 - x1;
-  height = y2 - y1;
-  const size = Math.max(width, height);
-  const centerX = x1 + width / 2;
-  const centerY = y1 + height / 2;
-  x1 = Math.max(0, centerX - size / 2);
-  y1 = Math.max(0, centerY - size / 2);
-  x2 = Math.min(imgWidth, x1 + size);
-  y2 = Math.min(imgHeight, y1 + size);
+  // 1. Inflate small boxes aggressively
+  const minRelSize = 0.15; // 15% of image
+  if (width < imgWidth * minRelSize) width *= 2.5;
+  if (height < imgHeight * minRelSize) height *= 2.5;
 
-  return [Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)];
+  // 2. Add padding (20% all around)
+  const padW = width * 0.2;
+  const padH = height * 0.2;
+  x -= padW;
+  y -= padH;
+  width += padW * 2;
+  height += padH * 2;
+
+  // 3. Minimum crop size (200px)
+  if (width < 200) width = 200;
+  if (height < 200) height = 200;
+
+  // 4. Clamp to image boundaries
+  if (x < 0) x = 0;
+  if (y < 0) y = 0;
+  if (x + width > imgWidth) width = imgWidth - x;
+  if (y + height > imgHeight) height = imgHeight - y;
+
+  // Optional: enforce square-ish aspect ratio
+  const diff = Math.abs(width - height);
+  if (diff / Math.max(width, height) > 0.1) {
+    const size = Math.max(width, height);
+    width = size;
+    height = size;
+    // re-clamp
+    if (x + width > imgWidth) x = imgWidth - width;
+    if (y + height > imgHeight) y = imgHeight - height;
+  }
+
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 
 async function cropImage(base64, cropCoords, outPath) {
@@ -127,25 +149,16 @@ Only include items worth at least $5 CAD resale.
         const { boundingBox } = item;
         if (!boundingBox) throw new Error('No bounding box');
 
-        const centerX = (boundingBox.x / 100) * imgWidth;
-        const centerY = (boundingBox.y / 100) * imgHeight;
-        const boxWidth = (boundingBox.width / 100) * imgWidth;
-        const boxHeight = (boundingBox.height / 100) * imgHeight;
-
-        let x1 = centerX - boxWidth / 2;
-        let y1 = centerY - boxHeight / 2;
-        let x2 = centerX + boxWidth / 2;
-        let y2 = centerY + boxHeight / 2;
-
-        [x1, y1, x2, y2] = adjustCropToSquare(x1, y1, x2, y2, imgWidth, imgHeight, 0.20);
-
-        console.log(`Cropping ${item.name}: (${x1}, ${y1}) → (${x2}, ${y2})`);
+        // Get safe crop box with padding and size constraints
+        const cropBox = getSafeCropBox(boundingBox, imgWidth, imgHeight);
+        
+        console.log(`Cropping ${item.name}: (${cropBox.x}, ${cropBox.y}) → (${cropBox.x + cropBox.width}, ${cropBox.y + cropBox.height})`);
 
         const safeName = item.name.replace(/[^a-z0-9_-]/gi, '_');
         const outFileName = `${safeName}.jpg`;
         const outPath = path.join('/tmp', outFileName);
 
-        await cropImage(image, [x1, y1, x2, y2], outPath);
+        await cropImage(image, [cropBox.x, cropBox.y, cropBox.x + cropBox.width, cropBox.y + cropBox.height], outPath);
         const croppedBase64 = fs.readFileSync(outPath, { encoding: 'base64' });
 
         return {
