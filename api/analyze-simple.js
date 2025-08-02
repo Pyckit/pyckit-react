@@ -141,7 +141,8 @@ Only include items worth at least $5 CAD resale.
 
         console.log(`Cropping ${item.name}: (${x1}, ${y1}) → (${x2}, ${y2})`);
 
-        const outFileName = `${item.name.replace(/[^a-z0-9]/gi, '_')}.jpg`;
+        const safeName = item.name.replace(/[^a-z0-9_-]/gi, '_');
+        const outFileName = `${safeName}.jpg`;
         const outPath = path.join('/tmp', outFileName);
 
         await cropImage(image, [x1, y1, x2, y2], outPath);

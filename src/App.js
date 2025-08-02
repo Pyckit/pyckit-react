@@ -405,7 +405,7 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
         </h3>
         
         <div className="item-price">
-          {(item.value ?? 0).toFixed(2)}
+          {item.value != null ? Number(item.value).toLocaleString('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 2 }) : 'N/A'}
         </div>
         
         {item.condition && (
