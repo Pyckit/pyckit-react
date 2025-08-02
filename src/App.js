@@ -344,7 +344,7 @@ const ItemCard = ({ item, index, onEdit, onRemove }) => {
 
   const handleList = (e) => {
     e.stopPropagation();
-    alert(`Listed: ${item.name} for $${item.value}`);
+    alert(`Listed: ${item.name} for ${Number(item.value).toLocaleString('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 })}`);
   };
 
   return (
@@ -657,7 +657,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   };
   
   const handleListFromModal = (item) => {
-    alert(`Listed: ${item.name} for $${item.value}`);
+    alert(`Listed: ${item.name} for ${Number(item.value).toLocaleString('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 })}`);
   };
   
   const handleRemove = (index) => {
@@ -672,7 +672,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
   };
   
   const handleListAll = () => {
-    alert(`Ready to list all ${items.length} items! Total value: $${totalValue}`);
+    alert(`Ready to list all ${items.length} items! Total value: ${totalValue.toLocaleString('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 })}`);
   };
   
   return (
@@ -680,7 +680,7 @@ const ImageAnalysis = ({ analysisData, imageFile }) => {
       <div className="total-value">
         <h3>Total Estimated Value</h3>
         <div className="amount">
-          ${totalValue.toLocaleString('en-CA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          ${totalValue.toLocaleString('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0, maximumFractionDigits: 0 })}
         </div>
       </div>
       
@@ -1119,8 +1119,8 @@ export default function App() {
         const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
         console.log('Sending request to:', endpoint);
         
-        // Default location or get from user settings
-        const userLocation = "Toronto, Canada"; // TODO: Make this configurable from user settings
+        // Hard-coded location for Calgary
+        const userLocation = "Calgary, Canada"; // Hard-coded for now
         
         const response = await fetch(endpoint, {
           method: 'POST',
