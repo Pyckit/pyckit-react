@@ -1119,15 +1119,11 @@ export default function App() {
         const endpoint = API_URL + (API_URL.endsWith('/api') ? '/analyze-simple' : '/api/analyze-simple');
         console.log('Sending request to:', endpoint);
         
-        // Default location or get from user settings
-        const userLocation = "Toronto, Canada"; // TODO: Make this configurable from user settings
-        
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image: base64,
-            location: userLocation,
             roomType: 'unknown'
           })
         });
