@@ -130,7 +130,10 @@ Ensure bounding boxes fully cover the object without cutting it off, with slight
       console.log(`Cropping ${item.name}: (${cropBox.x1}, ${cropBox.y1}) → (${cropBox.x2}, ${cropBox.y2})`);
 
       try {
-        const croppedPath = await cropAndSaveImage(image, cropBox, `${item.name.replace(/\s+/g, '_')}.jpg`);
+        // Replace problematic characters with underscores
+        const safeName = item.name.replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const fileName = `${safeName}.jpg`;
+        const croppedPath = await cropAndSaveImage(image, cropBox, fileName);
         const croppedBase64 = fs.readFileSync(croppedPath).toString('base64');
 
         croppedItems.push({
